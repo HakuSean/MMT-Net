@@ -1,7 +1,9 @@
 import csv
 import numpy as np
 import logging
-
+import os
+import sys
+import time
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -39,6 +41,37 @@ def calculate_accuracy(outputs, targets):
 
     return n_correct_elems / batch_size
 
+# from TSN: to get topk, for multi-class classification
+def accuracy(output, target, topk=(1,)):
+    """Computes the precision@k for the specified values of k"""
+    maxk = max(topk)
+    batch_size = target.size(0)
+
+    _, pred = output.topk(maxk, 1, True, True)
+    pred = pred.t()
+    correct = pred.eq(target.view(1, -1).expand_as(pred))
+
+    res = []
+    for k in topk:
+        correct_k = correct[:k].view(-1).float().sum(0)
+        res.append(correct_k.mul_(100.0 / batch_size))
+    return res
+
+def softmax(raw_score, T=1):
+    exp_s = np.exp((raw_score - raw_score.max(axis=-1)[..., None])*T)
+    sum_s = exp_s.sum(axis=-1)
+    return exp_s / sum_s[..., None]
+
+def mean_class_accuracy(scores, labels):
+    pred = np.argmax(scores, axis=1)
+    cf = confusion_matrix(labels, pred).astype(float)
+
+    cls_cnt = cf.sum(axis=1)
+    cls_hit = np.diag(cf)
+
+    return np.mean(cls_hit/cls_cnt)
+
+
 def f1_score(outputs, targets, compute=1, delta=1e-11):
     true_sum = np.sum(targets)
     pred_sum = np.sum(outputs)
@@ -60,17 +93,21 @@ def f1_score(outputs, targets, compute=1, delta=1e-11):
     return precision, recall, F1, specificity
 
 
-def create_logger(prefix):
-    log_file = 'logs/{}{}.log'.format(prefix, time.strftime('%Y-%m-%d-%H-%M'))
-    head = '%(asctime)-15s %(message)s'
-    logging.basicConfig(filename=os.path.join(log_file), format=head)
-    clogger = logging.getLogger()
-    clogger.setLevel(logging.INFO)
-    # add handler
-    # print to stdout and log file
-    ch = logging.StreamHandler(sys.stdout)
-    ch.setLevel(logging.INFO)
+def create_logger(log_path, name):
+    # define format
     formatter = logging.Formatter('%(asctime)s - %(message)s')
+
+    # define logger
+    clogger = logging.getLogger(name)
+    clogger.setLevel(logging.INFO)
+
+    # add file handler
+    handler = logging.FileHandler(os.path.join(log_path, '{}_{}.log'.format(name, time.strftime('%b%d-%H%M')))) 
+    handler.setFormatter(formatter)
+    clogger.addHandler(handler)
+
+    # print to stdout
+    ch = logging.StreamHandler(sys.stdout)
     ch.setFormatter(formatter)
     clogger.addHandler(ch)
     return clogger

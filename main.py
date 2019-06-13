@@ -21,29 +21,54 @@ from torch.optim import lr_scheduler
 from torchvision import transforms
 
 from opts import parse_opts
-from 3dmodel import generate_model
+from model3d import generate_3d
 from tsnmodel import generate_tsn
 
 from utils import *
 
-from mean import get_mean, get_std
+from ctdataset import CTDataSet
 from spatial_transforms import *
 from temporal_transforms import *
-from target_transforms import ClassLabel, VideoID
-from target_transforms import Compose as TargetCompose
-from dataset import get_training_set, get_validation_set, get_test_set
-from utils import Logger, adjust_learning_rate
+from utils import create_logger, learning_rate_steps
 from train import train_epoch
 from validation import val_epoch
-import test
 import time
+from math import sqrt
 
 if __name__ == '__main__':
     # set this to avoid loading memory problems
     # torch.backends.cudnn.enabled = False 
     args = parse_opts()
+    best_loss = float('inf')
+    best_acc = 0
+    start = time.time()
 
-    if args.model == 'bninception':
+    # input label files
+    train_list = os.path.join(args.annotation_path, args.dataset, 'training.txt')
+    val_list = os.path.join(args.annotation_path, args.dataset, 'validation.txt')
+
+    # set directory to save logs and training outputs
+    if args.tag:
+        args.tag = '_' + args.tag
+
+    outpath = os.path.join(args.result_path, args.dataset + args.tag)
+    if not os.path.exists(outpath):
+        os.makedirs(outpath)
+    
+    # set name of logs
+    with open(os.path.join(outpath, 'args_{}.json'.format(time.strftime('%b%d-%H%M'))), 'w') as arg_file:
+        json.dump(vars(args), arg_file)
+
+    train_logger = create_logger(outpath, 'train')
+    val_logger = create_logger(outpath, 'val')
+
+    torch.manual_seed(args.manual_seed)
+    print('Initial Defination time: {}'.format(time.time() - start))
+
+    # -----------------------------------
+    # --- prepare model -----------------
+    # -----------------------------------
+    if args.model == 'BNInception':
         args.arch = args.model
     elif args.model == 'svm':
         print('Please use train_svm.py')
@@ -51,35 +76,16 @@ if __name__ == '__main__':
     else: # ResNet related models
         args.arch = '{}-{}'.format(args.model, args.model_depth)
 
-    args.mean = get_mean(args.norm_value, dataset=args.mean_dataset)
-    args.std = get_std(args.norm_value, dataset=args.mean_dataset)
-
-    # set directory to save logs and training outputs
-    if args.tag:
-        args.tag = '_' + args.tag
-    if not os.path.exists(os.path.join(args.result_path, args.dataset + args.tag)):
-        os.makedirs(os.path.join(args.result_path, args.dataset + args.tag))
-    
-    # set name of logs
-    with open(os.path.join(args.result_path, args.dataset + args.tag, 'args_{}.json'.format(time.strftime('%b%d-%H%M'))), 'w') as arg_file:
-        json.dump(vars(args), arg_file)
-
-    torch.manual_seed(args.manual_seed)
-
-
-    # -----------------------------------
-    # --- prepare model -----------------
-    # -----------------------------------
     if args.model_type == '3d':
-        model, parameters = generate_3dmodel(args)
+        model, parameters = generate_3d(args)
     elif args.model_type == 'tsn':
-        model, parameters= generate_tsn(args)
+        model, parameters = generate_tsn(args)
     elif args.model_type == '2d':
-        model = generate_2dmodel(args)
+        model = generate_2d(args)
     else:
         raise ValueError("Unknown model type")
 
-    print(model)
+    # print(model)
 
     # -----------------------------------
     # --- prepare loss function ---------
@@ -99,50 +105,68 @@ if __name__ == '__main__':
     if torch.cuda.is_available():
         criterion = criterion.cuda()
 
-    # -----------------------------------
-    # --- prepare transformation --------
-    # -----------------------------------
+    print('Model & Loss Defination time: {}'.format(time.time() - start))
+
+    # ------------------------------------------
+    # --- prepare transformation (train) -------
+    # ------------------------------------------
 
     # prepare normalization method
     if args.no_mean_norm and not args.std_norm:
-        norm_method = Normalize(0., 1.)
+        norm_method = GroupNormalize([0.], [1.])
     elif not args.std_norm:
-        norm_method = Normalize(args.mean, 1.) # by default
+        norm_method = GroupNormalize(model.module.input_mean, [1.]) # by default
     else:
-        norm_method = Normalize(args.mean, 0.227)
+        norm_method = GroupNormalize(model.module.input_mean, model.module.input_std) # the model is already wrapped by DataParalell
 
     # prepare for crop
-    assert args.train_crop in ['random', 'corner', 'center']
-    if args.train_crop == 'random':
-        crop_method = MultiScaleRandomCrop(args.scales, args.sample_size)
-    elif args.train_crop == 'corner':
-        crop_method = MultiScaleCornerCrop(args.scales, args.sample_size)
-    elif args.train_crop == 'center':
-        crop_method = MultiScaleCornerCrop(
-            args.scales, args.sample_size, crop_positions=['c'])
+    crop_size = getattr(model.module, 'input_size', args.sample_size)
+    assert args.spatial_crop in ['random', 'five', 'center']
+    if args.spatial_crop == 'random':
+        crop_method = GroupRandomCrop(crop_size)
+    elif args.spatial_crop == 'five':
+        crop_method = GroupFiveCrop(crop_size)
+    elif args.spatial_crop == 'center':
+        crop_method = GroupCenterCrop(crop_size)
 
-    spatial_transform = Compose([
+    # define spatial and temporal transform
+    spatial_transform = transforms.Compose([
         crop_method,
-        # CenterCrop(args.sample_size),
-        GroupRandomRotation((30)),
-        RandomHorizontalFlip(),
-        ToTensor(),
-        Normalize([0.5], [0.227]),
+        GroupRandomRotation((20)),
+        GroupRandomHorizontalFlip(),
+        ToTorchTensor(args.model_type, norm=255, caffe_pretrain=args.arch == 'BNInception'),
+        norm_method,
     ])
-    # temporal_transform = TemporalRandomCrop(args.sample_duration)
-    temporal_transform = TemporalRandomStep(args.sample_duration, args.sample_step)
-    target_transform = ClassLabel()
-    training_data = get_training_set(args, spatial_transform,
-                                     temporal_transform, target_transform)
 
-    # ipdb.set_trace()
+    assert args.temporal_crop in ['segment', 'jump', 'step', 'center']
+    if args.temporal_crop == 'segment':
+        temporal_transform = TemporalSegmentCrop(args.n_slices, args.sample_thickness)
+    elif args.temporal_crop == 'jump':
+        temporal_transform = TemporalJumpCrop(args.n_slices, args.sample_thickness)
+    elif args.temporal_crop == 'step':
+        temporal_transform = TemporalStepCrop(args.n_slices, args.sample_step, args.sample_thickness)
+    elif args.temporal_crop == 'center':
+        temporal_transform = TemporalStepCrop(args.n_slices, args.sample_step, args.sample_thickness, test=True)
 
-    if args.sampler:
-        weights = [1./training_data.count[label] for _, label in training_data]
-        sampler = torch.utils.data.WeightedRandomSampler(weights, len(training_data))
+    print('Transformation Defination time: {}'.format(time.time() - start))
+
+    training_data = CTDataSet(train_list, args.sample_thickness, args.input_format, spatial_transform, temporal_transform, args.registration)
+
+    print('Dataset Defination time: {}'.format(time.time() - start))
+
+    # prepare for sampler (making a list is quite slow)
+    if args.sampler == 'sqrt':
+        weights = [1./sqrt(training_data.class_count[x.label]) for x in training_data.ct_list]
+        sampler = torch.utils.data.WeightedRandomSampler(weights, len(training_data.ct_list))
+    elif args.sampler == 'weighted':
+        weights = [1./training_data.class_count[x.label] for x in training_data.ct_list]
+        sampler = torch.utils.data.WeightedRandomSampler(weights, len(training_data.ct_list))
     else:
         sampler = None
 
+    print('Sampler Defination time: {}'.format(time.time() - start))
+
+    # define train_loader
     train_loader = torch.utils.data.DataLoader(
         training_data,
         batch_size=args.batch_size,
@@ -152,12 +176,11 @@ if __name__ == '__main__':
         sampler=sampler
         )
 
-    train_logger = Logger(
-        os.path.join(args.result_path, args.dataset+args.tag, 'train_{}.log'.format(time.strftime('%b%d-%H%M'))),
-        ['epoch', 'loss', 'acc', 'lr'])
-    train_batch_logger = Logger(
-        os.path.join(args.result_path, args.dataset+args.tag, 'train_batch_{}.log'.format(time.strftime('%b%d-%H%M'))),
-        ['epoch', 'batch', 'iter', 'loss', 'acc', 'lr'])
+    print('Train Loader time {}'.format(time.time() - start))
+
+    # -----------------------------------
+    # --- prepare optimizer -------------
+    # -----------------------------------
 
     if args.nesterov:
         dampening = 0
@@ -172,7 +195,6 @@ if __name__ == '__main__':
             dampening=dampening,
             weight_decay=args.weight_decay,
             nesterov=args.nesterov)
-
     elif args.optimizer == 'adadelta':
         optimizer = optim.adadelta(
             parameters,
@@ -197,27 +219,24 @@ if __name__ == '__main__':
             # scheduler = lr_scheduler.ReduceLROnPlateau(
             #     optimizer, 'min', patience=args.lr_patience)
 
-    # prepare for validation
-    if not args.no_val:
-        spatial_transform = Compose([
-            CenterCrop(args.sample_size),
-            ToTensor(),
-            Normalize([0.5], [0.227]) 
-            # transforms.Normalize(0.5, 0.227),
-        ])
-        # temporal_transform = LoopPadding(args.sample_duration)
-        temporal_transform = TemporalStepCrop(args.sample_duration, args.sample_step)
-        target_transform = ClassLabel()
-        validation_data = get_validation_set(
-            args, spatial_transform, temporal_transform, target_transform)
-        val_loader = torch.utils.data.DataLoader(
-            validation_data,
-            batch_size=args.n_val_samples,
-            shuffle=False,
-            num_workers=args.n_threads,
-            pin_memory=True)
-        val_logger = Logger(
-            os.path.join(args.result_path, args.dataset+args.tag, 'val_{}.log'.format(time.strftime('%b%d-%H%M'))), ['epoch', 'loss', 'acc'])
+
+    # -----------------------------------------
+    # --- prepare dataset (validation) --------
+    # -----------------------------------------
+    spatial_transform = transforms.Compose([
+        GroupCenterCrop(crop_size),
+        ToTorchTensor(args.model_type, norm=255, caffe_pretrain=args.arch == 'BNInception'),
+        norm_method, 
+    ])
+
+    temporal_transform = TemporalSegmentCrop(args.n_slices, args.sample_thickness)
+    validation_data = CTDataSet(val_list, args.sample_thickness, args.input_format, spatial_transform, temporal_transform, args.registration)
+    val_loader = torch.utils.data.DataLoader(
+        validation_data,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=args.n_threads,
+        pin_memory=True)
 
     # load from previous stage
     if args.resume_path:
@@ -230,55 +249,38 @@ if __name__ == '__main__':
         if not args.no_train:
             optimizer.load_state_dict(checkpoint['optimizer'])
 
-    # start running
-    print('run')
-    best_val = float('inf')
-    for i in range(args.begin_epoch, args.n_epochs + 1):
-        # ipdb.set_trace()
-        if not args.no_train:
+    # =========================================
+    # --- Start training / validation ---------
+    # =========================================
+    print('=> Start training')
+    for epoch in range(args.n_epochs):
 
-            train_epoch(i, train_loader, model, criterion, optimizer, args,
-                        train_logger, train_batch_logger)
-        if not args.no_val:
-            validation_loss = val_epoch(i, val_loader, model, criterion, args,
-                                        val_logger)
+        train_epoch(epoch, train_loader, model, criterion, optimizer, args, train_logger)
+        
+        if epoch % args.eval_freq == 0 or epoch == args.n_epochs - 1:
+            val_acc, val_loss = val_epoch(epoch, val_loader, model, criterion, args, val_logger)
 
-        if not args.no_train and not args.no_val:
-            # scheduler.step(validation_loss)
-            adjust_learning_rate(optimizer, i, args)
+            save_flag = 0
+            if val_loss < best_loss:
+                print('val loss decreases.')
+                best_loss = val_loss
+                save_flag = 1
 
-        if i % args.checkpoint == 0 and validation_loss < best_val:
-            best_val = validation_loss
+            if val_acc > best_acc:
+                print('val accuracy increases.')
+                best_acc = val_acc
 
-            save_file_path = os.path.join(args.result_path, args.dataset+args.tag, 
-                                      'best_{}.pth'.format(i))
-            states = {
-                'epoch': i + 1,
-                'arch': args.arch,
-                'state_dict': model.state_dict(),
-                'optimizer': optimizer.state_dict(),
-            }
-            torch.save(states, save_file_path)
+            if save_flag:
+                save_file_path = os.path.join(outpath, 'best_{}.pth'.format(epoch))
+                states = {
+                    'epoch': epoch,
+                    'arch': args.arch,
+                    'state_dict': model.state_dict(),
+                    'optimizer': optimizer.state_dict(),
+                    'best': [best_loss, best_acc]
+                }
+                torch.save(states, save_file_path)
 
+        # scheduler.step(validation_loss)
+        learning_rate_steps(optimizer, epoch, args)
 
-
-
-    # do some test
-    if args.test:
-        spatial_transform = Compose([
-            Scale(int(args.sample_size / args.scale_in_test)),
-            CornerCrop(args.sample_size, args.crop_position_in_test),
-            ToTensor(args.norm_value), norm_method
-        ])
-        temporal_transform = LoopPadding(args.sample_duration)
-        target_transform = VideoID()
-
-        test_data = get_test_set(args, spatial_transform, temporal_transform,
-                                 target_transform)
-        test_loader = torch.utils.data.DataLoader(
-            test_data,
-            batch_size=args.batch_size,
-            shuffle=False,
-            num_workers=args.n_threads,
-            pin_memory=True)
-        test.test(test_loader, model, args, test_data.class_names)

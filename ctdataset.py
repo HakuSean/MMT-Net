@@ -7,9 +7,7 @@ import numpy as np
 from numpy.random import randint
 import random
 
-import nibabel as nib
 import SimpleITK as sitk
-
 
 class CTRecord(object):
     def __init__(self, row):
@@ -31,7 +29,7 @@ class CTRecord(object):
 class CTDataSet(data.Dataset):
     def __init__(self, list_file,
                  sample_thickness=1, 
-                 image_type='jpg',
+                 input_format='jpg',
                  spatial_transform=None, temporal_transform=None,
                  registration=False):
 
@@ -43,10 +41,10 @@ class CTDataSet(data.Dataset):
         self.spatial_transform = spatial_transform
         self.temporal_transform = temporal_transform
         self.num_classes = 2 # dataset feature useful for model
-        self.image_type = image_type
+        self.input_format = input_format
         self.registration = registration
 
-        if image_type == 'jpg':
+        if input_format == 'jpg':
             self.image_tmpl = 'img{}_{:05d}.jpg'
 
         self._parse_list()
@@ -63,15 +61,15 @@ class CTDataSet(data.Dataset):
         
         Operations:
             if thickness > 1: output the average image of multiple consecutive images
-            if image_type is dicom: need to conduct slope and intercept to all images
+            if input_format is dicom: need to conduct slope and intercept to all images
         '''
         samples = list()
-        if self.image_type == 'jpg':
+        if self.input_format == 'jpg':
             for idx in indices:
                 imgs = np.array([np.array(Image.open(os.path.join(directory, self.image_tmpl.format(0, idx + i)))) for i in range(self.sample_thickness)])
                 samples.append(Image.fromarray(imgs.mean(axis=0).astype('float32')))
 
-        elif self.image_type in set(['dcm', 'dicom']):
+        elif self.input_format in set(['dcm', 'dicom']):
             # need to read dicoms and conduct windows, this is mainly designed for testing
 
             reader = sitk.ImageSeriesReader()
@@ -100,7 +98,7 @@ class CTDataSet(data.Dataset):
                 imgs = np.clip(imgs * rescaleSlope - rescaleIntercept, yMin, yMax)
                 samples.append(Image.fromarray(imgs.astype('float32')))
 
-        elif self.image_type in set(['nifti', 'nii', 'nii.gz']):
+        elif self.input_format in set(['nifti', 'nii', 'nii.gz']):
             reader = sitk.ReadImage(directory+'.nii.gz') # directory is actually the file name of nii's
             volume = sitk.GetArrayFromImage(reader)
 
@@ -140,7 +138,7 @@ class CTDataSet(data.Dataset):
         segment_indices = self.temporal_transform(record)
         images = self._load_images(record.path, segment_indices)
 
-        return self.transform(images), record.label
+        return self.spatial_transform(images), record.label
 
     def __len__(self):
         return len(self.ct_list)

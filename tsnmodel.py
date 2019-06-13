@@ -3,20 +3,33 @@
 
 '''
 
-
+import torch
 from torch import nn
 import torchvision
 from torch.nn.init import normal_, constant_
 
-from transforms import *
-
 def generate_tsn(args):
-    model = CTSN(args.n_classes, args.n_segments, 
+    model = CTSN(args.n_classes, args.n_slices, 
                 base_model=args.arch, channels=args.n_channels, 
                 consensus_type=args.fusion_type, dropout=args.dropout, 
                 partial_bn=not args.no_partialbn)
+    policies = model.get_optim_policies()
+    # for group in policies:
+    #     print(('group: {} has {} params, lr_mult: {}, decay_mult: {}'.format(
+    #         group['name'], len(group['params']), group['lr_mult'], group['decay_mult'])))
+
+    print(("""
+Initializing CTSN with base model: {}.
+CTSN Configurations:
+    num_segments:       {}
+    channels:           {}
+    crop_size:          {}
+    dropout_ratio:      {}
+        """.format(args.arch, args.n_slices, args.n_channels, model.input_size, args.dropout)))
     
-    return model, model.parameters()
+    model = torch.nn.DataParallel(model, device_ids=args.gpus).cuda()
+
+    return model, policies
 
 class CTSN(nn.Module):
     def __init__(self, num_class, num_segments,
@@ -34,15 +47,6 @@ class CTSN(nn.Module):
         self.consensus_type = consensus_type
         if not before_softmax and consensus_type != 'avg':
             raise ValueError("Only avg consensus can be used after Softmax")
-
-        print(("""
-Initializing CTSN with base model: {}.
-CTSN Configurations:
-    num_segments:       {}
-    channels:           {}
-    consensus_module:   {}
-    dropout_ratio:      {}
-        """.format(base_model, self.num_segments, self.channels, consensus_type, self.dropout)))
 
         # prepare model
         self._prepare_base_model(base_model)

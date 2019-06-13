@@ -2,21 +2,17 @@
 The operations in this script deal with spatial transformation.
 For each group of images, if there is any random operations, use the same random value for all.
 
-
 '''
-
-
 import random
 import math
 import numbers
 import collections
 import numpy as np
 import torch
+import torchvision
 from PIL import Image, ImageOps
-try:
-    import accimage
-except ImportError:
-    accimage = None
+
+import ipdb
 
 # different from RandomCrop: use the same random number for the group
 class GroupRandomCrop(object):
@@ -44,6 +40,14 @@ class GroupRandomCrop(object):
                 out_images.append(img.crop((x1, y1, x1 + tw, y1 + th)))
 
         return out_images
+
+class GroupFiveCrop(object):
+    def __init__(self, size):
+        self.worker = torchvision.transforms.FiveCrop(size)
+
+    def __call__(self, img_group):
+        return [self.worker(img) for img in img_group]
+
 
 class GroupCenterCrop(object):
     def __init__(self, size):
@@ -89,7 +93,7 @@ class GroupRandomRotation(object):
         else:
             if len(degrees) != 2:
                 raise ValueError("If degrees is a sequence, it must be of len 2.")
-            self.degrees = degrees
+            self.degrees = degreesf
 
     def __call__(self, img_group):
         """
@@ -102,63 +106,23 @@ class GroupRandomRotation(object):
 
         return [img.rotate(angle) for img in img_group]
 
-# new operation, derived from RandomRotate but in 3D.
-class GroupRandomRegistration(object):
-    """Rotate the image by angle in three dimensions.
-    Args:
-        degrees (sequence or float or int): Range of degrees to select from.
-            If degrees is a number instead of sequence like (min, max), the range of degrees
-            will be (-degrees, +degrees).
-    """
-
-    def __init__(self, degrees):
-        if isinstance(degrees, numbers.Number):
-            if degrees < 0:
-                raise ValueError("If degrees is a single number, it must be positive.")
-            self.degrees = (-degrees, degrees)
-        else:
-            if len(degrees) != 2:
-                raise ValueError("If degrees is a sequence, it must be of len 2.")
-            self.degrees = degrees
-
-    def __call__(self, img_group):
-        """
-            img (PIL Image): Image to be rotated.
-        Returns:
-            PIL Image: Rotated image.
-        """
-
-        angle = random.uniform(self.degrees[0], self.degrees[1])
-
-        return [img.rotate(angle) for img in img_group]
-
-# put different images to channels
-class Stack(object):
-
-    def __init__(self, roll=False):
-        self.roll = roll
-
-    def __call__(self, img_group):
-        if img_group[0].mode == 'L':
-            return np.concatenate([np.expand_dims(x, 2) for x in img_group], axis=2)
-        elif img_group[0].mode == 'RGB':
-            if self.roll:
-                return np.concatenate([np.array(x)[:, :, ::-1] for x in img_group], axis=2)
-            else:
-                return np.concatenate(img_group, axis=2)
-
-
+# put images within one group into one numpy.ndarray
 class ToTorchTensor(object):
     """Convert a ``PIL.Image`` or ``numpy.ndarray`` to tensor.
     Converts a PIL.Image or numpy.ndarray (H x W x C) in the range
     [0, 255] to a torch.FloatTensor of shape (C x H x W) in the range [0.0, 1.0].
+    
+    For reference:   
+        For RGB images, C is the RGB three channles multiplying number of segments.
+        However, this is not useful in CT images.
 
     The main difference between 2D TSN and 3D ResNet inputs is the final reshape operation.
     """
 
-    def __init__(self, model_type='3d', norm_value=255):
+    def __init__(self, model_type='3d', norm=255, caffe_pretrain=False):
         self.model_type = model_type
-        self.norm_value = norm_value
+        self.norm = norm
+        self.caffe_pretrain = caffe_pretrain
 
     def __call__(self, pic):
         """
@@ -167,57 +131,57 @@ class ToTorchTensor(object):
         Returns:
             Tensor: Converted image.
         """
+
+        # step 1: from pic to torch.Tensor
         if isinstance(pic, np.ndarray):
             # handle numpy array
-            img = torch.from_numpy(pic.transpose((2, 0, 1)))
-            # backward compatibility
-            return img.float().div(self.norm_value)
-
-        if accimage is not None and isinstance(pic, accimage.Image):
-            nppic = np.zeros(
-                [pic.channels, pic.height, pic.width], dtype=np.float32)
-            pic.copyto(nppic)
-            return torch.from_numpy(nppic)
-
-        # handle PIL Image
-        if pic.mode == 'I':
-            img = torch.from_numpy(np.array(pic, np.int32, copy=False))
-        elif pic.mode == 'I;16':
-            img = torch.from_numpy(np.array(pic, np.int16, copy=False))
+            img = torch.from_numpy(pic).permute(2, 0, 1).contiguous()
+        elif isinstance(pic, list):
+            # handle image group, ie list(Image):
+            img = np.concatenate([np.expand_dims(x, 2) for x in pic], axis=2) # 512 x 512 x N(image numbers)
+            img = torch.from_numpy(img).permute(2, 0, 1).contiguous()
         else:
+            # handle PIL Image
             img = torch.ByteTensor(torch.ByteStorage.from_buffer(pic.tobytes()))
-        # PIL image mode: 1, L, P, I, F, RGB, YCbCr, RGBA, CMYK
-        if pic.mode == 'YCbCr':
-            nchannel = 3
-        elif pic.mode == 'I;16':
-            nchannel = 1
-        else:
-            nchannel = len(pic.mode)
-        img = img.view(pic.size[1], pic.size[0], nchannel)
-        # put it from HWC to CHW format
-        # yikes, this transpose takes 80% of the loading time/CPU
-        img = img.transpose(0, 1).transpose(0, 2).contiguous()
-        if isinstance(img, torch.ByteTensor):
-            return img.float().div(self.norm_value)
+            img = img.view(pic.size[1], pic.size[0], len(pic.mode))
+            # put it from HWC to CHW format
+            # yikes, this transpose takes 80% of the loading time/CPU
+            img = img.transpose(0, 1).transpose(0, 2).contiguous()
+
+        # step 2: transpose for 3d
+        if self.model_type == '3d':
+            img = img.unsqueeze(0) # add one dim for real channel, the previous num_slices will become one input for 3D Net
+
+        # step 3: form 0-255 or 0-1
+        img = img.float().div(self.norm)
+
+        if self.caffe_pretrain:
+            return img.mul(255)
         else:
             return img
 
-class Sampler(object):
+# add channel-wise duplication in original Normalize
+class GroupNormalize(object):
+    def __init__(self, mean, std):
+        self.mean = mean
+        self.std = std
 
-    def __init__(self, sampler_type):
-        self.type = sampler_type
+    def __call__(self, tensor):
+        # tensor.size()[0] is the real channel, len(self.mean) is the channel of one single picture.
+        # For TSN, the division is the total slice number. For 3D, the division should always be one.
+        rep_mean = self.mean * (tensor.size()[0]//len(self.mean)) 
+        rep_std = self.std * (tensor.size()[0]//len(self.std))
 
-    def sqrt_sampler(self, ):
+        # TODO: make efficient
+        for t, m, s in zip(tensor, rep_mean, rep_std):
+            t.sub_(m).div_(s)
 
-        if args.sampler:
-            weights = [1./training_data.count[label] for _, label in training_data]
-            sampler = torch.utils.data.WeightedRandomSampler(weights, len(training_data))
-        else:
-            sampler = None
+        return tensor
 
 
-
-
+# ------------------------------------------------
+# --------- Deserted -----------------------------
+# ------------------------------------------------
 class Scale(object):
     """Rescale the input PIL.Image to the given size.
     Args:
@@ -280,7 +244,7 @@ class RandomHorizontalFlip(object):
         self.p = random.random()
 
 
-class GroupRandomRotation(object):
+class RandomRotation(object):
     """Rotate the image by angle.
     """
 
@@ -306,10 +270,6 @@ class GroupRandomRotation(object):
     def randomize_parameters(self):
         self.angle = random.uniform(self.degrees[0], self.degrees[1])
 
-
-# ------------------------------------------------
-# --------- Deserted -----------------------------
-# ------------------------------------------------
 class Compose3D(object):
     """Composes several transforms together.
     Args:
@@ -638,3 +598,19 @@ class CornerCrop(object):
             self.crop_position = self.crop_positions[random.randint(
                 0,
                 len(self.crop_positions) - 1)]
+
+
+class Stack(object):
+
+    def __init__(self, roll=False):
+        self.roll = roll
+
+    def __call__(self, img_group):
+        if img_group[0].mode == 'L':
+            return np.concatenate([np.expand_dims(x, 2) for x in img_group], axis=2)
+        elif img_group[0].mode == 'RGB':
+            if self.roll:
+                return np.concatenate([np.array(x)[:, :, ::-1] for x in img_group], axis=2)
+            else:
+                return np.concatenate(img_group, axis=2)
+

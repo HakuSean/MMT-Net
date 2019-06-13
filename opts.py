@@ -141,6 +141,8 @@ def parse_opts():
                         help='If true, output for each clip/network is not normalized using softmax.')
     parser.add_argument('--score_weights', type=float, nargs='+', default=None,
                         help='score weights for fusion')
+    parser.add_argument('--test_models', type=str, nargs='+', default=None,
+                        help='The models to be used for testing.')
     parser.add_argument('--concern_label', type=int, default=0,
                         help='The label for positive class.')
     parser.add_argument('--fusion_type', type=str, default='avg', choices=['avg', 'max', 'topk'],

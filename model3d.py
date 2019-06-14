@@ -182,7 +182,7 @@ def generate_3d(opt):
                 num_modalities=opt.n_channels)
 
     print(("""
-Initializing 3D-Net with base model: {}{}.
+Initializing 3D-Net with base model: {}{}
 3D-Net Configurations:
     num_segments:       {}
     channels:           {}

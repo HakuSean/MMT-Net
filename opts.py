@@ -31,8 +31,8 @@ def parse_opts():
     # ---------------------------------------------
     # -- Hardware Control -------------------------
     # ---------------------------------------------
-    parser.add_argument('--gpus', nargs='+', type=int, default=[0],
-                        help='Index of gpus used in training.')
+    parser.add_argument('--gpus', nargs='+', type=int, default=None,
+                        help='Index of gpus used in training. None means all.')
     parser.add_argument('--n_threads', type=int, default=8,
                         help='Number of threads for multi-thread loading')
 

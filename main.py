@@ -62,7 +62,7 @@ if __name__ == '__main__':
     train_logger.info(args)
 
     torch.manual_seed(args.manual_seed)
-    print('Initial Defination time: {}'.format(time.time() - start))
+    print('Initial Definition time: {}'.format(time.time() - start))
 
     # -----------------------------------
     # --- prepare model -----------------
@@ -104,7 +104,7 @@ if __name__ == '__main__':
     if torch.cuda.is_available():
         criterion = criterion.cuda()
 
-    print('Model & Loss Defination time: {}'.format(time.time() - start))
+    print('Model & Loss Definition time: {}'.format(time.time() - start))
 
     # ------------------------------------------
     # --- prepare transformation (train) -------
@@ -147,11 +147,11 @@ if __name__ == '__main__':
     elif args.temporal_crop == 'center':
         temporal_transform = TemporalStepCrop(args.n_slices, args.sample_step, args.sample_thickness, test=True)
 
-    print('Transformation Defination time: {}'.format(time.time() - start))
+    print('Transformation Definition time: {}'.format(time.time() - start))
 
     training_data = CTDataSet(train_list, args.sample_thickness, args.input_format, spatial_transform, temporal_transform, args.registration)
 
-    print('Dataset Defination time: {}'.format(time.time() - start))
+    print('Dataset Definition time: {}'.format(time.time() - start))
 
     # prepare for sampler (making a list is quite slow)
     if args.sampler == 'sqrt':
@@ -163,7 +163,7 @@ if __name__ == '__main__':
     else:
         sampler = None
 
-    print('Sampler Defination time: {}'.format(time.time() - start))
+    print('Sampler Definition time: {}'.format(time.time() - start))
 
     # define train_loader
     train_loader = torch.utils.data.DataLoader(

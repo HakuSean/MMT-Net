@@ -39,8 +39,6 @@ if __name__ == '__main__':
     # set this to avoid loading memory problems
     # torch.backends.cudnn.enabled = False 
     args = parse_opts()
-    best_loss = float('inf')
-    best_acc = 0
     start = time.time()
 
     # input label files
@@ -252,7 +250,10 @@ if __name__ == '__main__':
     # =========================================
     # --- Start training / validation ---------
     # =========================================
-    print('=> Start training')
+    print('=> Initial Validation')
+    best_acc, best_loss = val_epoch(0, val_loader, model, criterion, args, val_logger)
+
+    print('=> Start Training')
     for epoch in range(args.n_epochs):
 
         train_epoch(epoch, train_loader, model, criterion, optimizer, args, train_logger)

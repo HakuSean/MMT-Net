@@ -65,7 +65,7 @@ def train_epoch(epoch, data_loader, model, criterion, optimizer, opt, logger):
                    data_time=data_time, loss=losses, acc=accuracies, 
                    lr=optimizer.param_groups[-1]['lr'])))
 
-    if epoch % opt.checkpoint == 0:
+    if epoch % opt.eval_freq == 0:
         save_file_path = os.path.join(opt.result_path, opt.dataset + opt.tag, 
                                       'save_{}.pth'.format(epoch))
         states = {

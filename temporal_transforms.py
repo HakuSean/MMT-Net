@@ -16,7 +16,8 @@ Outputs:
     offsets: namely the numpy.array for all selected slice indices.
 
 Logs:
-06-13-2019: use offset + 1, ignore img_00000.jpg because size are incompatible.
+06-13-2019: let num_candidates = record.num_slices - self.sample_thickness
+because ignore the first slice already.
 
 '''
 
@@ -51,11 +52,11 @@ class TemporalJumpCrop(object):
         Returns:
             list (or numpy.array): Cropped frame indices.
         """
-        num_candidates = record.num_slices - self.sample_thickness + 1
+        num_candidates = record.num_slices - self.sample_thickness
         
         offsets = np.sort(randint(num_candidates, size=self.sample_size))
 
-        return offsets + 1
+        return offsets
 
 
 class TemporalSegmentCrop(object):
@@ -88,7 +89,7 @@ class TemporalSegmentCrop(object):
         Returns:
             list (or numpy.array): Cropped frame indices.
         """
-        num_candidates = record.num_slices - self.sample_thickness + 1
+        num_candidates = record.num_slices - self.sample_thickness
 
         # for val and test, the frames are retrieved uniformly
         if self.test:
@@ -113,7 +114,7 @@ class TemporalSegmentCrop(object):
 
             offsets = np.sort(slices)
         
-        return offsets + 1# offset + 1 when idx starts with 1
+        return offsets # offset + 1 when idx starts with 1
 
 
 class TemporalStepCrop(object):
@@ -144,7 +145,7 @@ class TemporalStepCrop(object):
         Returns:
             list (or numpy.array): Cropped frame indices.
         """
-        num_candidates = record.num_slices - self.sample_thickness + 1
+        num_candidates = record.num_slices - self.sample_thickness
 
         step = min( (num_candidates - 1) // (self.sample_size - 1), self.sample_step)
 
@@ -161,7 +162,7 @@ class TemporalStepCrop(object):
 
             offsets = np.sort(slices)
 
-        return offsets + 1
+        return offsets
 
 
 # --------------------------------------------------------------

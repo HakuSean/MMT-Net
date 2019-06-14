@@ -15,6 +15,9 @@ Common Args:
 Outputs:
     offsets: namely the numpy.array for all selected slice indices.
 
+Logs:
+06-13-2019: use offset + 1, ignore img_00000.jpg because size are incompatible.
+
 '''
 
 import random
@@ -52,7 +55,7 @@ class TemporalJumpCrop(object):
         
         offsets = np.sort(randint(num_candidates, size=self.sample_size))
 
-        return offsets
+        return offsets + 1
 
 
 class TemporalSegmentCrop(object):
@@ -110,7 +113,7 @@ class TemporalSegmentCrop(object):
 
             offsets = np.sort(slices)
         
-        return offsets # offset + 1 when idx starts with 1
+        return offsets + 1# offset + 1 when idx starts with 1
 
 
 class TemporalStepCrop(object):
@@ -158,7 +161,7 @@ class TemporalStepCrop(object):
 
             offsets = np.sort(slices)
 
-        return offsets
+        return offsets + 1
 
 
 # --------------------------------------------------------------

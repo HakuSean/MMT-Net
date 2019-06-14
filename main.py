@@ -54,11 +54,12 @@ if __name__ == '__main__':
         os.makedirs(outpath)
     
     # set name of logs
+    train_logger = create_logger(outpath, 'train')
+    val_logger = create_logger(outpath, 'val')
     with open(os.path.join(outpath, 'args_{}.json'.format(time.strftime('%b%d-%H%M'))), 'w') as arg_file:
         json.dump(vars(args), arg_file)
 
-    train_logger = create_logger(outpath, 'train')
-    val_logger = create_logger(outpath, 'val')
+    train_logger.info(args)
 
     torch.manual_seed(args.manual_seed)
     print('Initial Defination time: {}'.format(time.time() - start))
@@ -251,7 +252,7 @@ if __name__ == '__main__':
     # --- Start training / validation ---------
     # =========================================
     print('=> Initial Validation')
-    best_acc, best_loss = val_epoch(0, val_loader, model, criterion, args, val_logger)
+    best_loss, best_acc = val_epoch(0, val_loader, model, criterion, args, val_logger)
 
     print('=> Start Training')
     for epoch in range(args.n_epochs):
@@ -259,20 +260,22 @@ if __name__ == '__main__':
         train_epoch(epoch, train_loader, model, criterion, optimizer, args, train_logger)
         
         if epoch % args.eval_freq == 0 or epoch == args.n_epochs - 1:
-            val_acc, val_loss = val_epoch(epoch, val_loader, model, criterion, args, val_logger)
+            val_loss, val_acc = val_epoch(epoch, val_loader, model, criterion, args, val_logger)
 
+            # save two models according to loss or accuracy
             save_flag = 0
             if val_loss < best_loss:
-                print('val loss decreases.')
+                print('Val loss decreases at epoch {}.'.format(epoch))
+                save_file_path = os.path.join(outpath, 'best_loss.pth')
                 best_loss = val_loss
                 save_flag = 1
-
-            if val_acc > best_acc:
-                print('val accuracy increases.')
+            elif val_acc > best_acc:
+                print('Val accuracy increases at epoch {}.'.format(epoch))
                 best_acc = val_acc
+                save_file_path = os.path.join(outpath, 'best_acc.pth')
+                save_flag = 1
 
             if save_flag:
-                save_file_path = os.path.join(outpath, 'best_{}.pth'.format(epoch))
                 states = {
                     'epoch': epoch,
                     'arch': args.arch,

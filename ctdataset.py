@@ -19,7 +19,7 @@ class CTRecord(object):
 
     @property
     def num_slices(self):
-        return int(self._data[1])
+        return int(self._data[1]) - 1 # exclude the first slice
 
     @property
     def label(self):

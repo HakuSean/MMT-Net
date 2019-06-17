@@ -12,6 +12,7 @@ def generate_tsn(args):
     model = CTSN(args.n_classes, args.n_slices, 
                 base_model=args.arch, channels=args.n_channels, 
                 consensus_type=args.fusion_type, dropout=args.dropout, 
+                pretrained=not args.pretrain_path == '',
                 partial_bn=not args.no_partialbn)
     policies = model.get_optim_policies()
     # for group in policies:
@@ -27,7 +28,7 @@ CTSN Configurations:
     dropout_ratio:      {}
         """.format(args.arch, args.n_slices, args.n_channels, model.input_size, args.dropout)))
     
-    model = torch.nn.DataParallel(model, device_ids=args.gpus).cuda()
+    model = nn.DataParallel(model).cuda()
 
     return model, policies
 
@@ -35,16 +36,15 @@ class CTSN(nn.Module):
     def __init__(self, num_class, num_segments,
                  base_model='resnet101', channels=1,
                  consensus_type='avg', before_softmax=True,
-                 dropout=0.8,
-                 crop_num=1, partial_bn=True):
+                 dropout=0.8, pretrained=True,
+                 partial_bn=True):
         super(CTSN, self).__init__()
         self.channels = channels
         self.num_segments = num_segments
         self.reshape = True
         self.before_softmax = before_softmax
         self.dropout = dropout
-        self.crop_num = crop_num
-        self.consensus_type = consensus_type
+        self.pretrained = pretrained
         if not before_softmax and consensus_type != 'avg':
             raise ValueError("Only avg consensus can be used after Softmax")
 
@@ -53,9 +53,9 @@ class CTSN(nn.Module):
 
         feature_dim = self._prepare_ctsn(num_class) # initialize the last layer
 
-        print("Converting the ImageNet model to a CT init model")
+        print("Converting the ImageNet model to a CTSN init model")
         self.base_model = self._construct_ct_model(self.base_model)
-        print("Done. CT model ready...")
+        print("Done. CTSN model ready...")
 
         # special operations
         # self.consensus = ConsensusModule(consensus_type)
@@ -90,7 +90,7 @@ class CTSN(nn.Module):
     def _prepare_base_model(self, base_model):
 
         if 'resnet' in base_model or 'vgg' in base_model:
-            self.base_model = getattr(torchvision.models, base_model)(True)
+            self.base_model = getattr(torchvision.models, base_model)(self.pretrained)
             self.base_model.last_layer_name = 'fc'
             self.input_size = 224
             # self.input_mean = [0.485, 0.456, 0.406]
@@ -100,7 +100,7 @@ class CTSN(nn.Module):
 
         elif base_model == 'BNInception':
             import tf_model_zoo
-            self.base_model = getattr(tf_model_zoo, base_model)()
+            self.base_model = getattr(tf_model_zoo, base_model)(self.pretrained)
             self.base_model.last_layer_name = 'last_linear'
             self.input_size = 224
             # self.input_mean = [104, 117, 128]
@@ -108,7 +108,7 @@ class CTSN(nn.Module):
             self.input_mean = [128]
 
         elif 'inception' in base_model:
-            self.base_model = getattr(torchvision.models, base_model)(True)
+            self.base_model = getattr(torchvision.models, base_model)(self.pretrained)
             self.base_model.last_layer_name = 'classif'
             self.input_size = 299
             self.input_mean = [0.5]

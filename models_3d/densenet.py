@@ -45,29 +45,6 @@ def densenet264(**kwargs):
     return model
 
 
-def get_fine_tuning_parameters(model, ft_begin_index):
-    if ft_begin_index == 0:
-        return model.parameters()
-
-    ft_module_names = []
-    for i in range(ft_begin_index, 5):
-        ft_module_names.append('denseblock{}'.format(i))
-        ft_module_names.append('transition{}'.format(i))
-    ft_module_names.append('norm5')
-    ft_module_names.append('classifier')
-
-    parameters = []
-    for k, v in model.named_parameters():
-        for ft_module in ft_module_names:
-            if ft_module in k:
-                parameters.append({'params': v})
-                break
-        else:
-            parameters.append({'params': v, 'lr': 0.0})
-
-    return parameters
-
-
 class _DenseLayer(nn.Sequential):
 
     def __init__(self, num_input_features, growth_rate, bn_size, drop_rate):
@@ -148,8 +125,8 @@ class DenseNet(nn.Module):
                  num_init_features=64,
                  bn_size=4,
                  drop_rate=0,
-                 num_classes=1000,
-                 num_modalities=1):
+                 num_classes=400,
+                 ):
 
         super(DenseNet, self).__init__()
 
@@ -165,7 +142,7 @@ class DenseNet(nn.Module):
             OrderedDict([
                 ('conv0',
                  nn.Conv3d(
-                     num_modalities,
+                     3,
                      num_init_features,
                      kernel_size=7,
                      stride=(1, 2, 2),

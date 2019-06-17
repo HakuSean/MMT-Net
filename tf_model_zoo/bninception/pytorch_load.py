@@ -6,7 +6,7 @@ import yaml
 
 
 class BNInception(nn.Module):
-    def __init__(self, model_path='tf_model_zoo/bninception/bn_inception.yaml', num_classes=101,
+    def __init__(self, pretrained, model_path='tf_model_zoo/bninception/bn_inception.yaml', num_classes=101,
                        weight_dir='pretrained/bn_inception_weights_pt04.pt'):
         super(BNInception, self).__init__()
 
@@ -32,7 +32,9 @@ class BNInception(nn.Module):
                 channel = sum([self._channel_dict[x] for x in in_var])
                 self._channel_dict[out_var[0]] = channel
 
-        self.load_state_dict(torch.load(weight_dir))
+        if pretrained:
+            print('Use pretrained BNInception')
+            self.load_state_dict(torch.load(weight_dir))
 
     def forward(self, input):
         data_dict = dict()

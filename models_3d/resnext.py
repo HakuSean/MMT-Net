@@ -90,7 +90,7 @@ class ResNeXt(nn.Module):
                  shortcut_type='B',
                  cardinality=32,
                  num_classes=400,
-                 num_modalities=1):
+                 ):
 
         # define input_mean and input_std (same as TSN)
         self.input_mean = [0.5]
@@ -99,7 +99,7 @@ class ResNeXt(nn.Module):
         self.inplanes = 64
         super(ResNeXt, self).__init__()
         self.conv1 = nn.Conv3d(
-            num_modalities,
+            3,
             64,
             kernel_size=7,
             stride=(1, 2, 2),
@@ -180,42 +180,21 @@ class ResNeXt(nn.Module):
         return x
 
 
-def get_fine_tuning_parameters(model, ft_begin_index):
-    if ft_begin_index == 0:
-        return model.parameters()
-
-    ft_module_names = []
-    for i in range(ft_begin_index, 5):
-        ft_module_names.append('layer{}'.format(i))
-    ft_module_names.append('fc')
-
-    parameters = []
-    for k, v in model.named_parameters():
-        for ft_module in ft_module_names:
-            if ft_module in k:
-                parameters.append({'params': v})
-                break
-        else:
-            parameters.append({'params': v, 'lr': 0.0})
-
-    return parameters
-
-
-def resnet50(**kwargs):
+def resnext50(**kwargs):
     """Constructs a ResNet-50 model.
     """
     model = ResNeXt(ResNeXtBottleneck, [3, 4, 6, 3], **kwargs)
     return model
 
 
-def resnet101(**kwargs):
+def resnext101(**kwargs):
     """Constructs a ResNet-101 model.
     """
     model = ResNeXt(ResNeXtBottleneck, [3, 4, 23, 3], **kwargs)
     return model
 
 
-def resnet152(**kwargs):
+def resnext152(**kwargs):
     """Constructs a ResNet-101 model.
     """
     model = ResNeXt(ResNeXtBottleneck, [3, 8, 36, 3], **kwargs)

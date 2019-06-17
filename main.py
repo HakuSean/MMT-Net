@@ -39,6 +39,12 @@ if __name__ == '__main__':
     # set this to avoid loading memory problems
     # torch.backends.cudnn.enabled = False 
     args = parse_opts()
+
+    # set gpus
+    if args.gpus: # if none, use all
+        gpus = ','.join(args.gpus)
+        os.environ["CUDA_VISIBLE_DEVICES"] = gpus
+
     start = time.time()
 
     # input label files

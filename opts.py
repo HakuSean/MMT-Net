@@ -31,7 +31,7 @@ def parse_opts():
     # ---------------------------------------------
     # -- Hardware Control -------------------------
     # ---------------------------------------------
-    parser.add_argument('--gpus', nargs='+', type=int, default=None,
+    parser.add_argument('--gpus', nargs='+', type=str, default=None,
                         help='Index of gpus used in training. None means all.')
     parser.add_argument('--n_threads', type=int, default=8,
                         help='Number of threads for multi-thread loading')
@@ -98,6 +98,8 @@ def parse_opts():
                         help='When training from pretrained, add dropout previous to an extra linear layer.')
     parser.add_argument('--resume_path', type=str, default='',
                         help='Use the saved .pth of previous training for finetuning')
+    parser.add_argument('--ft_begin_index', type=int, default=0,
+                        help='Begin block index of fine-tuning')
     parser.add_argument('--manual_seed', type=int, default=1, 
                         help='Manually set random seed for training') 
 

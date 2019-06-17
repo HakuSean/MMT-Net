@@ -17,7 +17,7 @@ Outputs:
 
 Logs:
 06-13-2019: let num_candidates = record.num_slices - self.sample_thickness
-because ignore the first slice already.
+because should exclude the first slice also.
 
 '''
 
@@ -56,7 +56,7 @@ class TemporalJumpCrop(object):
         
         offsets = np.sort(randint(num_candidates, size=self.sample_size))
 
-        return offsets
+        return offsets + 1
 
 
 class TemporalSegmentCrop(object):
@@ -114,7 +114,7 @@ class TemporalSegmentCrop(object):
 
             offsets = np.sort(slices)
         
-        return offsets # offset + 1 when idx starts with 1
+        return offsets + 1# offset + 1 when idx starts with 1
 
 
 class TemporalStepCrop(object):
@@ -162,7 +162,7 @@ class TemporalStepCrop(object):
 
             offsets = np.sort(slices)
 
-        return offsets
+        return offsets + 1
 
 
 # --------------------------------------------------------------

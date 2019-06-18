@@ -49,18 +49,16 @@ Initializing 3D-Net with base model: {}{}
 
         model.load_state_dict(pretrain['state_dict'])
 
-        model = construct_3d_model(model, opt)
+    model = construct_3d_model(model, opt)
 
-        if opt.model == 'densenet':
-            model.module.classifier = nn.Linear(
-                model.module.classifier.in_features, opt.n_classes).cuda()
-        else:
-            model.module.fc = nn.Linear(model.module.fc.in_features,
-                                        opt.n_classes).cuda()
-
-        parameters = get_fine_tuning_parameters(model, opt.ft_begin_index, is_densenet= opt.model == 'densenet')
+    if opt.model == 'densenet':
+        model.module.classifier = nn.Linear(
+            model.module.classifier.in_features, opt.n_classes).cuda()
     else:
-        parameters = model.parameters()
+        model.module.fc = nn.Linear(model.module.fc.in_features,
+                                    opt.n_classes).cuda()
+
+    parameters = get_fine_tuning_parameters(model, opt.ft_begin_index, is_densenet= opt.model == 'densenet')
 
     return model, parameters
 

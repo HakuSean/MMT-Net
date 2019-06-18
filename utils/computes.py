@@ -5,6 +5,9 @@ import os
 import sys
 import time
 
+from sklearn.metrics import confusion_matrix
+
+
 class AverageMeter(object):
     """Computes and stores the average and current value"""
 
@@ -30,6 +33,19 @@ def load_value_file(file_path):
 
     return value
 
+def softmax(raw_score, T=1):
+    exp_s = np.exp((raw_score - raw_score.max(axis=-1)[..., None])*T)
+    sum_s = exp_s.sum(axis=-1)
+    return exp_s / sum_s[..., None]
+
+def mean_accuracy(scores, labels):
+    pred = np.argmax(scores, axis=1)
+    cf = confusion_matrix(labels, pred).astype(float)
+
+    cls_cnt = cf.sum(axis=1)
+    cls_hit = np.diag(cf)
+
+    return np.mean(cls_hit/cls_cnt)
 
 def calculate_accuracy(outputs, targets):
     batch_size = targets.size(0)
@@ -56,20 +72,6 @@ def accuracy(output, target, topk=(1,)):
         correct_k = correct[:k].view(-1).float().sum(0)
         res.append(correct_k.mul_(100.0 / batch_size))
     return res
-
-def softmax(raw_score, T=1):
-    exp_s = np.exp((raw_score - raw_score.max(axis=-1)[..., None])*T)
-    sum_s = exp_s.sum(axis=-1)
-    return exp_s / sum_s[..., None]
-
-def mean_class_accuracy(scores, labels):
-    pred = np.argmax(scores, axis=1)
-    cf = confusion_matrix(labels, pred).astype(float)
-
-    cls_cnt = cf.sum(axis=1)
-    cls_hit = np.diag(cf)
-
-    return np.mean(cls_hit/cls_cnt)
 
 
 def f1_score(outputs, targets, compute=1, delta=1e-11):

@@ -141,7 +141,7 @@ def parse_opts():
     #                     help='Number of validation samples for each activity')
     # parser.add_argument('--no_softmax_in_test', action='store_true', default=False,
     #                     help='If true, output for each clip/network is not normalized using softmax.')
-    parser.add_argument('--test_mode', type=str, default='single', choices=['single', 'ensemble', 'analysis'])
+    parser.add_argument('--analysis', action='store_true', default=False,                help='Analysis bad results.')
     parser.add_argument('--score_weights', type=float, nargs='+', default=None,
                         help='score weights for fusion')
     parser.add_argument('--test_models', type=str, nargs='+', default=None,

@@ -228,11 +228,11 @@ if __name__ == '__main__':
         norm_method, 
     ])
 
-    temporal_transform = TemporalSegmentCrop(args.n_slices, args.sample_thickness)
+    temporal_transform = TemporalSegmentCrop(args.n_slices, args.sample_thickness, test=True)
     validation_data = CTDataSet(val_list, args.sample_thickness, args.input_format, spatial_transform, temporal_transform, args.registration)
     val_loader = torch.utils.data.DataLoader(
         validation_data,
-        batch_size=args.batch_size,
+        batch_size=1,
         shuffle=False,
         num_workers=args.n_threads,
         pin_memory=True)

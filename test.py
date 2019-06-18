@@ -1,174 +1,183 @@
 '''
-python3 ensemble.py ct40k_0514_bin_hemorrhage --model_depth 18 --n_val_samples 1 --sample_duration 20 --n_classes 2 --sample_size 384 --resume_path ./results/ct40k_0514_bin_hemorrhage_b4_s384_d20_randomcrop_flip_rot30/best_20.pth 
+python3 ensemble.py ct40k_0514_bin_hemorrhage --model_depth 18 --n_test_samples 1 --sample_duration 20 --n_classes 2 --sample_size 384 --resume_path ./results/ct40k_0514_bin_hemorrhage_b4_s384_d20_randomcrop_flip_rot30/best_20.pth 
 
 '''
 
 import os
 import sys
-import json
 import numpy as np
 import ipdb
+import time
 import pandas as pd
+
 import torch
 from torch import nn
-from torch import optim
-from torch.optim import lr_scheduler
 from torchvision import transforms
 
+from utils import *
+from ctdataset import CTDataSet
+from epochs import test_epoch
 from opts import parse_opts
+from model3d import generate_3d
+from tsnmodel import generate_tsn
 from spatial_transforms import *
 from temporal_transforms import *
-from utils import Logger, adjust_learning_rate, f1_score
-from validation import val_analysis
-import time
-import sqlite3
-from sklearn.metrics import confusion_matrix
 
 if __name__ == '__main__':
-    torch.backends.cudnn.enabled = False
-    opt = parse_opts()
-    opt.no_train = True
-    opt.arch = '{}-{}'.format(opt.model, opt.model_depth)
 
-    if not opt.resume_path:
-        print('Please indicate a resume_path for testing')
-        sys.exit()
+    # ===================================
+    # --- Initialization ----------------
+    # ===================================
+    args = parse_opts()
+    start = time.time()
 
-    # opt.mean = get_mean(opt.norm_value, dataset=opt.mean_dataset)
-    # opt.std = get_std(opt.norm_value, dataset=opt.mean_dataset)
-
-    # check the input options
-    print(opt)
-
-    # store logs
-    opt.tag = os.path.dirname(opt.resume_path)
-
-    torch.manual_seed(opt.manual_seed)
-
-    # prepare model
-    model, parameters = generate_model(opt)
-    # print(model)
-
-    # prepare loss function
-    if opt.loss_type == 'nll':
-        criterion = nn.CrossEntropyLoss()
-    elif opt.loss_type == 'weighted':
-        criterion = nn.CrossEntropyLoss(weight=torch.Tensor((0.2, 0.1, 0.7)))
-    elif opt.loss_type == 'focal':
-        criterion = FocalLoss(opt.n_classes)
+    if args.score_weights is None:
+        score_weights = [1] * len(args.test_models)
     else:
-        raise ValueError("Unknown loss type")
-    if torch.cuda.is_available():
-        criterion = criterion.cuda()
+        score_weights = args.score_weights
+        if len(score_weights) != len(args.test_models):
+            raise ValueError("Only {} weight specifed for a total of {} models".format(len(score_weights), len(args.test_models)))
 
-    # prepare for validation
-    spatial_transform = Compose([
-        CenterCrop(opt.sample_size),
-        ToTensor(),
-        Normalize([0.5], [0.227]) 
-        # transforms.Normalize(0.5, 0.227),
-    ])
-    # temporal_transform = LoopPadding(opt.sample_duration)
-    temporal_transform = TemporalStepCrop(opt.sample_duration, opt.sample_step)
-    target_transform = ClassLabel()
-    validation_data = get_validation_set(
-        opt, spatial_transform, temporal_transform, target_transform)
-    val_loader = torch.utils.data.DataLoader(
-        validation_data,
-        batch_size=1, # would want to anaylysis for each case
-        shuffle=False,
-        num_workers=opt.n_threads,
-        pin_memory=True)
-    val_logger = Logger(
-        os.path.join(opt.tag, 'analysis_{}.log'.format(time.strftime('%b%d-%H'))), ['loss', 'acc'])
+    # set gpus
+    if args.gpus: # if none, use all
+        gpus = ','.join(args.gpus)
+        os.environ["CUDA_VISIBLE_DEVICES"] = gpus
 
-    # get names
-    val_names = [i['video'].split('/')[-1].replace('_', '.') for i in validation_data.data]
+    # input label files
+    test_list = os.path.join(args.annotation_path, args.dataset, 'validation.txt')
 
-    # load from previous stage
-    print('loading checkpoint {}'.format(opt.resume_path))
-    checkpoint = torch.load(opt.resume_path)
-    assert opt.arch == checkpoint['arch']
+    # set directory to save logs and training outputs
+    if args.tag:
+        args.tag = '_' + args.tag
 
-    opt.begin_epoch = checkpoint['epoch']
-    model.load_state_dict(checkpoint['state_dict'])
+    outpath = os.path.join(args.result_path, args.dataset + args.tag)
+    if not os.path.exists(outpath):
+        os.makedirs(outpath)
+    
+    # set name of logs
+    test_logger = create_logger(outpath, 'test')
+    test_logger.info('Using model {}'.format(args.test_models))
+    test_logger.info('Using weights {}'.format(score_weights))
 
-    # start running
-    print('Start testing')
+    test_logger.info('Initial Definition time: {}'.format(time.time() - start))
 
-    _, scores = val_analysis(val_names, val_loader, model, criterion, opt, val_logger, concern_label=0)
+    score_lists = list()
 
-    # combine the scores with TSN
-    tsn = np.load(opt.second)['scores']
-    labels = np.load(opt.second)['labels']
 
-    if opt.score_weights is None:
-        score_weights = [1] * 2
-    else:
-        score_weights = opt.score_weights
-        if len(score_weights) != 2:
-            raise ValueError("Only {} weight specifed for a total of {} score files"
-                             .format(len(score_weights), len(score_npz_files)))
+    # ===================================
+    # --- Each model --------------------
+    # ===================================
+    
+    for checkpoint in args.test_models:
+        start = time.time()
+        # -----------------------------------
+        # --- Prepare model -----------------
+        # -----------------------------------
+
+        # load from previous stage
+        
+        print('loading checkpoint {}'.format(checkpoint))
+        checkpoint = torch.load(checkpoint)
+        snap_opts = checkpoint['args']
+        snap_opts.pretrain_path = ''
+        arch = checkpoint['arch']
+
+        # load model
+        if snap_opts.model_type == '3d':
+            model, parameters = generate_3d(snap_opts)
+        elif snap_opts.model_type == 'tsn':
+            model, parameters = generate_tsn(snap_opts)
+        elif snap_opts.model_type == '2d':
+            model = generate_2d(snap_opts)
+        else:
+            raise ValueError("Unknown model type")
+
+        # load model states
+        model.load_state_dict(checkpoint['state_dict'])
+
+        # -----------------------------------
+        # --- Prepare data ------------------
+        # -----------------------------------
+
+        # prepare normalization method
+        if snap_opts.no_mean_norm and not snap_opts.std_norm:
+            norm_method = GroupNormalize([0.], [1.])
+        elif not snap_opts.std_norm:
+            norm_method = GroupNormalize(model.module.input_mean, [1.]) # by default
+        else:
+            norm_method = GroupNormalize(model.module.input_mean, model.module.input_std) # the model is already wrapped by DataParalell
+
+        crop_size = getattr(model.module, 'input_size', snap_opts.sample_size)
+
+        spatial_transform = transforms.Compose([
+            GroupCenterCrop(crop_size),
+            ToTorchTensor(snap_opts.model_type, norm=255, caffe_pretrain=snap_opts.arch == 'BNInception'),
+            norm_method, 
+        ])
+        temporal_transform = TemporalSegmentCrop(snap_opts.n_slices, snap_opts.sample_thickness, test=True)
+
+        test_data = CTDataSet(test_list, snap_opts.sample_thickness, snap_opts.input_format, spatial_transform, temporal_transform, snap_opts.registration)
+        test_loader = torch.utils.data.DataLoader(
+            test_data,
+            batch_size=1,
+            shuffle=False,
+            num_workers=args.n_threads,
+            pin_memory=True)
+
+        print('Preparation time for {}-{} is {}'.format(arch, snap_opts.model_type, time.time() - start))
+        
+        scores = test_epoch(test_loader, model, snap_opts, test_logger, concern_label=snap_opts.concern_label)
+        score_lists.append(np.array(scores))
+
+        print('Prediction time for {}-{} is {}'.format(arch, snap_opts.model_type, time.time() - start))
+
+    # -----------------------------------
+    # --- Post-process Score ------------
+    # -----------------------------------
 
     # score_aggregation
-    score_lists = [np.array(scores)]
-    score_lists.append(tsn)
     final_scores = np.zeros_like(scores)
     for s, w in zip(score_lists, score_weights):
         final_scores += w * softmax(s)
 
     # accuracy
-    acc = mean_class_accuracy(final_scores, labels)
+    labels = np.array([record.label for record in test_data.ct_list])
+    acc = mean_accuracy(final_scores, labels)
     pred = np.argmax(final_scores, axis=1)
     measures = f1_score(pred, labels, compute=0)
+        
+    test_logger.info('\nFinal Precision (tp/tp+fp):\t{:.3f}'.format(measures[0]))
+    test_logger.info('Final Recall (tp/tp+fn):\t{:.3f}'.format(measures[1]))
+    test_logger.info('Final F1-measure (2pr/p+r):\t{:.3f}'.format(measures[2]))
+    test_logger.info('Final Sensitivity (tp/tp+fn):\t{:.3f}'.format(measures[1]))
+    test_logger.info('Final Specificity (tn/tn+fp):\t{:.3f}'.format(measures[3]))
+    test_logger.info('Final Accuracy (tn+tp/all):\t{:.03f}%'.format(acc * 100))
+
+    # -----------------------------------
+    # --- Analysis Results --------------
+    # -----------------------------------
 
     # prepare false_alarm and missed cases
-    false_alarm = ['line\tid\tscores\n']
-    missed = ['line\tid\tscores\n']
-    for i in range(len(labels)):
-        if labels[i] and not pred[i]: # 1 = non, 0 = hemo
-            false_alarm.append('{}\t{}\t{}\n'.format(
-                i+1, validation_data.data[i]['video'].split('/')[-1], final_scores[i]))
+    if args.analysis:
+        false_alarm = ['line\tid\t\tscores']
+        missed = ['line\tid\t\tscores']
 
-        if not labels[i] and pred[i]:
-            missed.append('{}\t{}\t{}\n'.format(
-                i+1, validation_data.data[i]['video'].split('/')[-1], final_scores[i]))
-    # print
-    print('False alarms: ')
-    for i in false_alarm:
-        print(i)
+        for i in range(len(labels)):
+            if labels[i] and not pred[i]: # 1 = non, 0 = hemo
+                false_alarm.append('{}\t{}\t[{:.4f} {:.4f}]'.format(
+                    i+1, test_data.ct_list[i].path.split('/')[-1], final_scores[i][0], final_scores[i][1]))
 
-    print('Missed cases: ')
-    for i in missed:
-        print(i)
-        
-    print('Final accuracy {:.03f}%'.format(acc * 100))
-    print('Precision (tp/tp+fp) = {:.03f}, '
-        'Recall/Sensitivity (tp/tp+fn) = {:.03f}, '
-        'F1 (2pr/p+r) = {:.03f}, '
-        'Specificity (tn/tn+fp) = {:.03f}, '
-        'Accuracy (Specificity+Sensitivity/2) = {:.03f}'.format(
-            measures[0], measures[1], measures[2], measures[3],
-            (measures[1]+measures[3])/2))
+            if not labels[i] and pred[i]:
+                missed.append('{}\t{}\t[{:.4f} {:.4f}]'.format(
+                    i+1, test_data.ct_list[i].path.split('/')[-1], final_scores[i][0], final_scores[i][1]))
+
+        # print
+        test_logger.info('\nFalse alarms: ')
+        for i in false_alarm:
+            test_logger.info(i)
+
+        test_logger.info('\nMissed cases: ')
+        for i in missed:
+            test_logger.info(i)
 
 
-
-    # # do some test
-    # if args.test:
-    #     spatial_transform = Compose([
-    #         Scale(int(args.sample_size / args.scale_in_test)),
-    #         CornerCrop(args.sample_size, args.crop_position_in_test),
-    #         ToTensor(args.norm_value), norm_method
-    #     ])
-    #     temporal_transform = LoopPadding(args.sample_duration)
-    #     target_transform = VideoID()
-
-    #     test_data = get_test_set(args, spatial_transform, temporal_transform,
-    #                              target_transform)
-    #     test_loader = torch.utils.data.DataLoader(
-    #         test_data,
-    #         batch_size=args.batch_size,
-    #         shuffle=False,
-    #         num_workers=args.n_threads,
-    #         pin_memory=True)
-    #     test.test(test_loader, model, args, test_data.class_names)

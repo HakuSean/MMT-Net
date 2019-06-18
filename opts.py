@@ -127,8 +127,8 @@ def parse_opts():
                         help='Batch Size')
     parser.add_argument( '--n_epochs', type=int, default=100, 
                         help='Number of total epochs to run')
-    # parser.add_argument('--begin_epoch', type=int, default=1,
-    #                     help= 'Training begins at this epoch. Previous trained model indicated by resume_path is loaded.')
+    parser.add_argument('--begin_epoch', type=int, default=0,
+                        help= 'Training begins at this epoch. Previous trained model indicated by resume_path is loaded.')
     parser.add_argument('--clip-gradient', '--gd', default=None, type=float,
                         help='gradient norm clipping (default: disabled)')
     parser.add_argument('--no_partialbn', '--pb', default=False, action="store_true",
@@ -139,16 +139,18 @@ def parse_opts():
     # ---------------------------------------------
     # parser.add_argument('--n_val_samples', type=int, default=1,
     #                     help='Number of validation samples for each activity')
-    parser.add_argument('--no_softmax_in_test', action='store_true', default=False,
-                        help='If true, output for each clip/network is not normalized using softmax.')
+    # parser.add_argument('--no_softmax_in_test', action='store_true', default=False,
+    #                     help='If true, output for each clip/network is not normalized using softmax.')
+    parser.add_argument('--test_mode', type=str, default='single', choices=['single', 'ensemble', 'analysis'])
     parser.add_argument('--score_weights', type=float, nargs='+', default=None,
                         help='score weights for fusion')
     parser.add_argument('--test_models', type=str, nargs='+', default=None,
-                        help='The models to be used for testing.')
+                        help='The models to be used for testing, should be saved model files, i.e. .pth or .tar .')
     parser.add_argument('--concern_label', type=int, default=0,
                         help='The label for positive class.')
     parser.add_argument('--fusion_type', type=str, default='avg', choices=['avg', 'max', 'topk'],
                         help='Fusion method for prediction scores in different frames/clips.')
+
 
     args = parser.parse_args()
 

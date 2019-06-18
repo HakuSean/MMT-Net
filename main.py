@@ -2,10 +2,7 @@
 Main training file for CTBinaryTriage. After first prepare labels and nifti, use main.py to train the model.
 The hyper-parameters are in opts.py. Here is an example.
 
-
-
-
-
+2019-06-18: use two kinds of results storage. For testing, use only the saved 'best_loss.pth' or 'best_acc.pth' according to validation. The other one is simlpy used for tracking, which could be removed once training is done. (in train.py)
 
 '''
 
@@ -13,27 +10,24 @@ import os
 import sys
 import json
 import numpy as np
-import ipdb
+import time
+from math import sqrt
+
 import torch
 from torch import nn
 from torch import optim
 from torch.optim import lr_scheduler
 from torchvision import transforms
 
+from ctdataset import CTDataSet
+from epochs import train_epoch, val_epoch
 from opts import parse_opts
 from model3d import generate_3d
 from tsnmodel import generate_tsn
-
-from utils import *
-
-from ctdataset import CTDataSet
 from spatial_transforms import *
 from temporal_transforms import *
-from utils import create_logger, learning_rate_steps
-from train import train_epoch
-from validation import val_epoch
-import time
-from math import sqrt
+from utils import *
+
 
 if __name__ == '__main__':
     # set this to avoid loading memory problems
@@ -251,8 +245,7 @@ if __name__ == '__main__':
 
         args.begin_epoch = checkpoint['epoch']
         model.load_state_dict(checkpoint['state_dict'])
-        if not args.no_train:
-            optimizer.load_state_dict(checkpoint['optimizer'])
+        optimizer.load_state_dict(checkpoint['optimizer'])
 
     # =========================================
     # --- Start training / validation ---------
@@ -261,7 +254,7 @@ if __name__ == '__main__':
     best_loss, best_acc = val_epoch(0, val_loader, model, criterion, args, val_logger)
 
     print('=> Start Training')
-    for epoch in range(args.n_epochs):
+    for epoch in range(args.begin_epoch, args.n_epochs):
 
         train_epoch(epoch, train_loader, model, criterion, optimizer, args, train_logger)
         
@@ -287,7 +280,8 @@ if __name__ == '__main__':
                     'arch': args.arch,
                     'state_dict': model.state_dict(),
                     'optimizer': optimizer.state_dict(),
-                    'best': [best_loss, best_acc]
+                    'best': [best_loss, best_acc],
+                    'args': args # used for ensemble predictions
                 }
                 torch.save(states, save_file_path)
 

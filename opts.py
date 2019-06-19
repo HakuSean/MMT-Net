@@ -150,6 +150,9 @@ def parse_opts():
                         help='The label for positive class.')
     parser.add_argument('--fusion_type', type=str, default='avg', choices=['avg', 'max', 'topk'],
                         help='Fusion method for prediction scores in different frames/clips.')
+    parser.add_argument('--threshold', '--th', type=float, default=0.5,
+                        help='Threshold used for accuracy. Only used in Test.')
+
 
 
     args = parser.parse_args()

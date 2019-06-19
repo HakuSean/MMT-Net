@@ -10,6 +10,8 @@ import ipdb
 import time
 import pandas as pd
 
+from sklearn.metrics import confusion_matrix, roc_auc_score
+
 import torch
 from torch import nn
 from torchvision import transforms
@@ -138,26 +140,33 @@ if __name__ == '__main__':
     # score_aggregation
     final_scores = np.zeros_like(scores)
     for s, w in zip(score_lists, score_weights):
-        final_scores += w * softmax(s)
+        final_scores += w * softmax(s) # should use softmax, so the score values in different models should be comparable 
 
-    # accuracy
-    labels = np.array([record.label for record in test_data.ct_list])
-    acc = mean_accuracy(final_scores, labels)
-    pred = np.argmax(final_scores, axis=1)
-    measures = f1_score(pred, labels, compute=0)
+    # calculate accuracy
+    ground_truth = np.array([record.label for record in test_data.ct_list])
+    pred_labels = (final_scores[:, 1] >= args.threshold).astype(int)
+    if not args.threshold == 0.5:
+        test_logger.info('Use >={} for label 1 (usually non-hemorrhage, i.e. negative).'.format(args.threshold))
+
+    acc = (ground_truth == pred_labels).sum() / len(ground_truth)
+    
+    measures = f1_score(pred_labels, ground_truth, compute=0)
         
-    test_logger.info('\nFinal Precision (tp/tp+fp):\t{:.3f}'.format(measures[0]))
+    test_logger.info('Final Precision (tp/tp+fp):\t{:.3f}'.format(measures[0]))
     test_logger.info('Final Recall (tp/tp+fn):\t{:.3f}'.format(measures[1]))
     test_logger.info('Final F1-measure (2pr/p+r):\t{:.3f}'.format(measures[2]))
     test_logger.info('Final Sensitivity (tp/tp+fn):\t{:.3f}'.format(measures[1]))
     test_logger.info('Final Specificity (tn/tn+fp):\t{:.3f}'.format(measures[3]))
     test_logger.info('Final Accuracy (tn+tp/all):\t{:.03f}%'.format(acc * 100))
+    test_logger.info("AUC Score (Test): %f" % roc_auc_score(ground_truth, final_scores[:, 1]))
 
     # -----------------------------------
     # --- Analysis Results --------------
     # -----------------------------------
 
     # prepare false_alarm and missed cases
+
+
     if args.analysis:
         false_alarm = ['line\tid\t\tscores']
         missed = ['line\tid\t\tscores']
@@ -179,5 +188,3 @@ if __name__ == '__main__':
         test_logger.info('\nMissed cases: ')
         for i in missed:
             test_logger.info(i)
-
-

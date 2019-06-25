@@ -251,7 +251,7 @@ if __name__ == '__main__':
     # --- Start training / validation ---------
     # =========================================
     print('=> Initial Validation')
-    best_loss, best_acc = val_epoch(0, val_loader, model, criterion, args, val_logger)
+    best_loss, best_acc = val_epoch(args.begin_epoch, val_loader, model, criterion, args, val_logger)
 
     print('=> Start Training')
     for epoch in range(args.begin_epoch, args.n_epochs):

@@ -80,19 +80,14 @@ class CTDataSet(data.Dataset):
             # need to read dicoms and conduct windows, this is mainly designed for testing
 
             reader = sitk.ImageSeriesReader()
+            reader.MetaDataDictionaryArrayUpdateOn()
             dicom_names = reader.GetGDCMSeriesFileNames(next(os.walk(folder, topdown=False))[0])
 
-            # for windows, needs to read one image and get metadata.
+            # Get window info. Rescale intercept has been considered.
             # 0028,1050 -- Window Center
             # 0028,1051 -- Window Width
-            # 0028,1052 -- Rescale Intercept
-            # 0028,1053 -- Rescale Slope
-            single_reader = sitk.ImageFileReader()
-            single_reader.SetFileName(dicom_names[0])
-            winCenter = int(single_reader.GetMetaData('0028|1050').split('\\')[0])
-            winWidth = int(single_reader.GetMetaData('0028|1051').split('\\')[0])
-            rescaleIntercept = int(single_reader.GetMetaData('0028|1052'))
-            rescaleSlope = int(single_reader.GetMetaData('0028|1053'))
+            winCenter = int(reader.GetMetaData(1, '0028|1050').split('\\')[0])
+            winWidth = int(reader.GetMetaData(1, '0028|1051').split('\\')[0])
  
              # change image pixel values
             yMin = winCenter - 0.5 * winWidth
@@ -102,7 +97,7 @@ class CTDataSet(data.Dataset):
                 reader.SetFileNames(dicom_names[idx:idx + self.sample_thickness])
                 imgs = sitk.GetArrayFromImage(reader.Execute()).mean(axis=0)
                 # conduct rescale and window
-                imgs = np.clip(imgs * rescaleSlope - rescaleIntercept, yMin, yMax)
+                imgs = np.clip(imgs, yMin, yMax)
                 samples.append(Image.fromarray(imgs.astype('float32')))
 
         elif self.input_format in set(['nifti', 'nii', 'nii.gz']):

@@ -10,7 +10,8 @@ from torch.nn.init import normal_, constant_
 
 def generate_tsn(args):
     model = CTSN(args.n_classes, args.n_slices, 
-                base_model=args.arch, channels=args.n_channels, 
+                base_model=args.arch.replace('-', ''), 
+                channels=args.n_channels, 
                 consensus_type=args.fusion_type, dropout=args.dropout, 
                 pretrained=not args.pretrain_path == '',
                 partial_bn=not args.no_partialbn)

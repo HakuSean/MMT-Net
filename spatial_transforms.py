@@ -178,11 +178,8 @@ class GroupNormalize(object):
 
         return tensor
 
-
-# ------------------------------------------------
-# --------- Deserted -----------------------------
-# ------------------------------------------------
-class Scale(object):
+# different from Resize: flip for the whole group according to probability
+class GroupResize(object):
     """Rescale the input PIL.Image to the given size.
     Args:
         size (sequence or int): Desired output size. If size is a sequence like
@@ -195,36 +192,38 @@ class Scale(object):
     """
 
     def __init__(self, size, interpolation=Image.BILINEAR):
-        assert isinstance(size,
-                          int) or (isinstance(size, collections.Iterable) and
-                                   len(size) == 2)
+        assert isinstance(size, int) or (isinstance(size, collections.Iterable) 
+            and len(size) == 2)
         self.size = size
         self.interpolation = interpolation
 
-    def __call__(self, img):
+    def __call__(self, img_group):
         """
         Args:
             img (PIL.Image): Image to be scaled.
         Returns:
             PIL.Image: Rescaled image.
         """
+
         if isinstance(self.size, int):
-            w, h = img.size
+            w, h = img_group[0].size
+
             if (w <= h and w == self.size) or (h <= w and h == self.size):
-                return img
+                return img_group
             if w < h:
                 ow = self.size
                 oh = int(self.size * h / w)
-                return img.resize((ow, oh), self.interpolation)
+                return [img.resize((ow, oh), self.interpolation) for img in img_group]
             else:
                 oh = self.size
                 ow = int(self.size * w / h)
-                return img.resize((ow, oh), self.interpolation)
+                return [img.resize((ow, oh), self.interpolation) for img in img_group]
         else:
-            return img.resize(self.size, self.interpolation)
+            return [img.resize(self.size, self.interpolation) for img in img_group]
 
-    def randomize_parameters(self):
-        pass
+# ------------------------------------------------
+# --------- Deserted -----------------------------
+# ------------------------------------------------
 
 class RandomHorizontalFlip(object):
     """Horizontally flip the given PIL.Image randomly with a probability of 0.5."""

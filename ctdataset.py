@@ -117,6 +117,10 @@ class CTDataSet(data.Dataset):
         for x in open(self.list_file):
             row = x.strip().split(' ') # three components: path, frames, label
 
+            # total number of nifti is always 170
+            if self.input_format in ['nifti', 'nii', 'nii.gz'] and int(row[1]) >= 170:
+                row[1] = '170'
+                
             # num_classes:
             if int(row[-1]) >= self.num_classes:
                 for i in range(self.num_classes, int(row[-1]) + 1):

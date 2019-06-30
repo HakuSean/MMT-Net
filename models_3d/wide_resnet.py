@@ -164,7 +164,7 @@ class WideResNet(nn.Module):
         return x
 
 
-def wideresnet50(**kwargs):
+def resnet50(**kwargs):
     """Constructs a ResNet-50 model.
     """
     model = WideResNet(WideBottleneck, [3, 4, 6, 3], **kwargs)

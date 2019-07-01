@@ -8,7 +8,7 @@ def parse_opts():
     # -- Input and Output -------------------------
     # ---------------------------------------------
     parser.add_argument('dataset', type=str, default='ct40k',
-                        help='Used dataset, depend on tagging folder name.')
+                        help='Used dataset, depend on tagging folder name. OR use single case for testing')
     # parser.add_argument('--ct_path', type=str, default='/home/dongang/Documents/crcp/data/', 
     #                     help='Directory path of dataset')
     parser.add_argument('--annotation_path', type=str, default='/home/dongang/Documents/crcp/tagging/',

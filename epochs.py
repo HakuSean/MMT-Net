@@ -164,7 +164,7 @@ def evaluate_model(data_loader, model, opt, logger, concern_label=1):
 
             outputs_label.append(outputs.argmax().item())
             targets_label.append(targets.item())
-            outputs_score.append([round(i.item(), 4) for i in outputs.cpu()[0]])
+            outputs_score.append([round(s.item(), 4) for s in outputs.cpu()[0]])
 
             # # select out the bad
             # if not outputs_label[-1] == targets_label[-1]:
@@ -182,63 +182,22 @@ def evaluate_model(data_loader, model, opt, logger, concern_label=1):
     return outputs_score
 
 
-def predict(data_loader, model, opt, logger, concern_label=1):
-    # batch_size should always be one.
+def predict(data_loader, model, opt, concern_label=1):
+    # batch_size must be one.
 
     model.eval()
 
-    batch_time = AverageMeter()
-    data_time = AverageMeter()
-    accuracies = AverageMeter()
-
-    end_time = time.time()
-
     outputs_score = []
-    outputs_label = []
-    targets_label = []
 
     with torch.no_grad():
         for i, (inputs, targets) in enumerate(data_loader): # each time only read one instance
-            data_time.update(time.time() - end_time)
-
             if torch.cuda.is_available():
                 inputs = inputs.cuda()
                 targets = targets[0].unsqueeze(0).cuda()
 
             outputs = model(inputs)
-            batch_time.update(time.time() - end_time)
-            end_time = time.time()
+            # pred = outputs.argmax().item()
             
-            acc = calculate_accuracy(outputs, targets)
-            accuracies.update(acc, inputs.size(0))
-
-            logger.info(
-                'Case: [{0}/{1}]\t'
-                'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
-                'Acc {2} ({acc.avg:.3f})'.format(
-                i + 1,
-                len(data_loader),
-                outputs.argmax().item(),
-                batch_time=batch_time,
-                data_time=data_time,
-                acc=accuracies))
-
-            outputs_label.append(outputs.argmax().item())
-            targets_label.append(targets.item())
-            outputs_score.append([round(i.item(), 4) for i in outputs.cpu()[0]])
-
-            # # select out the bad
-            # if not outputs_label[-1] == targets_label[-1]:
-            #     bad_index.append(i)
-
-        precision, recall, F1, specificity = f1_score(outputs_label, targets_label, compute=concern_label)
-
-    logger.info('Model {}-{}: Precision (tp/tp+fp):\t{:.3f}'.format(opt.arch, opt.model_type, precision))
-    logger.info('Model {}-{}: Recall (tp/tp+fn):\t{:.3f}'.format(opt.arch, opt.model_type, recall))
-    logger.info('Model {}-{}: F1-measure (2pr/p+r):\t{:.3f}'.format(opt.arch, opt.model_type, F1))
-    logger.info('Model {}-{}: Sensitivity (tp/tp+fn):\t{:.3f}'.format(opt.arch, opt.model_type, recall))
-    logger.info('Model {}-{}: Specificity (tn/tn+fp):\t{:.3f}'.format(opt.arch, opt.model_type, specificity))
-    logger.info('Model {}-{}: Accuracy (tn+tp/all):\t{acc.avg:.3f}\n'.format(opt.arch, opt.model_type, acc=accuracies))
+            outputs_score.append([round(s.item(), 4) for s in outputs.cpu()[0]])
 
     return outputs_score

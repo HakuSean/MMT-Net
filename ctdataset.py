@@ -2,7 +2,6 @@ import torch.utils.data as data
 
 from PIL import Image
 import os
-import os.path
 import numpy as np
 from numpy.random import randint
 import random
@@ -47,7 +46,10 @@ class CTDataSet(data.Dataset):
         if input_format == 'jpg':
             self.image_tmpl = 'img{}_{:05d}.jpg'
 
-        self._parse_list()
+        if os.path.exists(list_file):
+            self._parse_list()
+        else:
+            self._parse_case()
         # self.volumes = dict()
 
         # for idx, record in enumerate(self.ct_list)
@@ -114,6 +116,7 @@ class CTDataSet(data.Dataset):
     def _parse_list(self):
         self.ct_list = list()
         self.class_count = {i: 0 for i in range(self.num_classes)} # prepare for weighted sampler
+
         for x in open(self.list_file):
             row = x.strip().split(' ') # three components: path, frames, label
 
@@ -129,6 +132,19 @@ class CTDataSet(data.Dataset):
 
             self.ct_list.append(CTRecord(row))
             self.class_count[int(row[-1])] += 1
+
+    def _parse_case(self):
+        row = self.list_file.split(' ') # two components: path, frames
+
+        # make a fake class number
+        if len(row) < 3:
+            row.append('0') # this is only used to hold place
+        
+        # total number of nifti is always 170
+        if self.input_format in ['nifti', 'nii', 'nii.gz'] and int(row[1]) >= 170:
+            row[1] = '170'
+
+        self.ct_list = [CTRecord(row)]
 
     def __getitem__(self, index):
         record = self.ct_list[index]

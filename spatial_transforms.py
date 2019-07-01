@@ -119,7 +119,7 @@ class ToTorchTensor(object):
     The main difference between 2D TSN and 3D ResNet inputs is the final reshape operation.
     """
 
-    def __init__(self, model_type='3d', norm=255, caffe_pretrain=False):
+    def __init__(self, model_type='3d', norm=None, caffe_pretrain=False):
         self.model_type = model_type
         self.norm = norm
         self.caffe_pretrain = caffe_pretrain
@@ -153,10 +153,13 @@ class ToTorchTensor(object):
             img = img.unsqueeze(0) # add one dim for real channel, the previous num_slices will become one input for 3D Net
 
         # step 3: form 0-255 or 0-1
-        img = img.float().div(self.norm)
+        if not self.norm: # for dicom, each case specifically
+            img = img.float().sub(img.min()).div(img.max() - img.min())
+        elif not self.norm == 1.0: # for jpg, norm = 255
+            img = img.float().div(self.norm)
 
         if self.caffe_pretrain:
-            return img.mul(255)
+            return img.mul(255.0)
         else:
             return img
 

@@ -65,6 +65,16 @@ if __name__ == '__main__':
 
     score_lists = list()
 
+    # prepare for value range
+    if args.input_format == 'jpg':
+        norm_value = 255.0
+    elif args.input_format in ['nifti', 'nii', 'nii.gz']:
+        norm_value = 1.0
+    elif args.input_format in ['dicom', 'dcm']:
+        norm_value = None # will be dealt in ToTorchTensor
+    else:
+        raise ValueError("Unknown input format type.")
+
 
     # ===================================
     # --- Each model --------------------
@@ -113,12 +123,12 @@ if __name__ == '__main__':
 
         spatial_transform = transforms.Compose([
             GroupCenterCrop(crop_size),
-            ToTorchTensor(snap_opts.model_type, norm=255, caffe_pretrain=snap_opts.arch == 'BNInception'),
+            ToTorchTensor(snap_opts.model_type, norm=norm_value, caffe_pretrain=snap_opts.arch == 'BNInception'),
             norm_method, 
         ])
         temporal_transform = TemporalSegmentCrop(snap_opts.n_slices, snap_opts.sample_thickness, test=True)
 
-        eval_data = CTDataSet(eval_list, snap_opts.sample_thickness, snap_opts.input_format, spatial_transform, temporal_transform, snap_opts.registration)
+        eval_data = CTDataSet(eval_list, snap_opts.sample_thickness, args.input_format, spatial_transform, temporal_transform, snap_opts.registration)
         eval_loader = torch.utils.data.DataLoader(
             eval_data,
             batch_size=1,
@@ -128,7 +138,7 @@ if __name__ == '__main__':
 
         print('Preparation time for {}-{} is {}'.format(arch, snap_opts.model_type, time.time() - start))
         
-        scores = evaluate_model(eval_loader, model, snap_opts, eval_logger, concern_label=snap_opts.concern_label)
+        scores = evaluate_model(eval_loader, model, snap_opts, eval_logger, concern_label=args.concern_label)
         score_lists.append(np.array(scores))
 
         print('Prediction time for {}-{} is {}'.format(arch, snap_opts.model_type, time.time() - start))

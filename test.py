@@ -67,6 +67,15 @@ if __name__ == '__main__':
 
     score_lists = list()
 
+    # prepare for value range
+    if args.input_format == 'jpg':
+        norm_value = 255.0
+    elif args.input_format in ['nifti', 'nii', 'nii.gz']:
+        norm_value = 1.0
+    elif args.input_format in ['dicom', 'dcm']:
+        norm_value = None # will be dealt in ToTorchTensor
+    else:
+        raise ValueError("Unknown input format type.")
 
     # ===================================
     # --- Each model --------------------
@@ -111,16 +120,18 @@ if __name__ == '__main__':
         else:
             norm_method = GroupNormalize(model.module.input_mean, model.module.input_std) # the model is already wrapped by DataParalell
 
+        # get input_size other wise use the sample_size
         crop_size = getattr(model.module, 'input_size', snap_opts.sample_size)
 
         spatial_transform = transforms.Compose([
+            GroupResize(384 if args.input_format == 'nifti' else 512),
             GroupCenterCrop(crop_size),
-            ToTorchTensor(snap_opts.model_type, norm=255, caffe_pretrain=snap_opts.arch == 'BNInception'),
+            ToTorchTensor(snap_opts.model_type, norm=norm_value, caffe_pretrain=snap_opts.arch == 'BNInception'),
             norm_method, 
         ])
         temporal_transform = TemporalSegmentCrop(snap_opts.n_slices, snap_opts.sample_thickness, test=True)
 
-        test_data = CTDataSet(test_list, snap_opts.sample_thickness, snap_opts.input_format, spatial_transform, temporal_transform, snap_opts.registration)
+        test_data = CTDataSet(test_list, snap_opts.sample_thickness, args.input_format, spatial_transform, temporal_transform, snap_opts.registration)
         test_loader = torch.utils.data.DataLoader(
             test_data,
             batch_size=1,
@@ -153,13 +164,13 @@ if __name__ == '__main__':
 
         test_logger.info(
             'Case: [{0}/{1}]\t'
-            'Name {2}\t'
-            'Pred {3}'.format(
+            'Name: {2:13s} '
+            'Pred: {3}'.format(
             i + 1, 
             len(test_data), 
             file.split('/')[-1], 
             label))
 
-        if not label == args.concern_label:  # i.e. non-hemorrhage
-            test_logger.info('There is no hemorrhage in the case by prediction.')
-            # os.system('rm -r {}'.format(file))
+        # if not label == args.concern_label:  # i.e. non-hemorrhage
+        #     test_logger.info('There is no hemorrhage in the case by prediction.')
+        #     os.system('rm -r {}'.format(file))

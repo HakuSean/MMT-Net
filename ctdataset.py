@@ -50,6 +50,7 @@ class CTDataSet(data.Dataset):
             self._parse_list()
         else:
             self._parse_case()
+
         # self.volumes = dict()
 
         # for idx, record in enumerate(self.ct_list)
@@ -83,24 +84,25 @@ class CTDataSet(data.Dataset):
 
             reader = sitk.ImageSeriesReader()
             reader.MetaDataDictionaryArrayUpdateOn()
-            dicom_names = reader.GetGDCMSeriesFileNames(next(os.walk(folder, topdown=False))[0])
-
-            # Get window info. Rescale intercept has been considered.
-            # 0028,1050 -- Window Center
-            # 0028,1051 -- Window Width
-            winCenter = int(reader.GetMetaData(1, '0028|1050').split('\\')[0])
-            winWidth = int(reader.GetMetaData(1, '0028|1051').split('\\')[0])
- 
-             # change image pixel values
-            yMin = winCenter - 0.5 * winWidth
-            yMax = winCenter + 0.5 * winWidth
+            dicom_names = reader.GetGDCMSeriesFileNames(next(os.walk(directory, topdown=False))[0])
 
             for idx in indices:
                 reader.SetFileNames(dicom_names[idx:idx + self.sample_thickness])
-                imgs = sitk.GetArrayFromImage(reader.Execute()).mean(axis=0)
+                imgs = sitk.GetArrayFromImage(reader.Execute())
+
+                # Get window info. Rescale intercept has been considered.
+                # 0028,1050 -- Window Center
+                # 0028,1051 -- Window Width
+                winCenter = float(reader.GetMetaData(0, '0028|1050').split('\\')[0])
+                winWidth = float(reader.GetMetaData(0, '0028|1051').split('\\')[0])
+     
+                 # change image pixel values
+                yMin = int(winCenter - 0.5 * winWidth)
+                yMax = int(winCenter + 0.5 * winWidth)
+
                 # conduct rescale and window
                 imgs = np.clip(imgs, yMin, yMax)
-                samples.append(Image.fromarray(imgs.astype('float32')))
+                samples.append(Image.fromarray(imgs.mean(axis=0).astype('float32')))
 
         elif self.input_format in set(['nifti', 'nii', 'nii.gz']):
             reader = sitk.ReadImage(directory+'.nii.gz') # directory is actually the file name of nii's

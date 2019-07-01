@@ -118,6 +118,16 @@ if __name__ == '__main__':
     else:
         norm_method = GroupNormalize(model.module.input_mean, model.module.input_std) # the model is already wrapped by DataParalell
 
+    # prepare for value range
+    if args.input_format == 'jpg':
+        norm_value = 255.0
+    elif args.input_format in ['nifti', 'nii', 'nii.gz']:
+        norm_value = 1.0
+    elif args.input_format in ['dicom', 'dcm']:
+        norm_value = None # will be dealt in ToTorchTensor
+    else:
+        raise ValueError("Unknown input format type.")
+
     # prepare for crop
     crop_size = getattr(model.module, 'input_size', args.sample_size)
     assert args.spatial_crop in ['random', 'five', 'center']
@@ -134,7 +144,7 @@ if __name__ == '__main__':
         crop_method,
         GroupRandomRotation((20)),
         GroupRandomHorizontalFlip(),
-        ToTorchTensor(args.model_type, norm=255, caffe_pretrain=args.arch == 'BNInception'),
+        ToTorchTensor(args.model_type, norm=norm_value, caffe_pretrain=args.arch == 'BNInception'),
         norm_method,
     ])
 
@@ -226,7 +236,7 @@ if __name__ == '__main__':
     spatial_transform = transforms.Compose([
         GroupResize(384 if args.input_format == 'nifti' else 512),
         GroupCenterCrop(crop_size),
-        ToTorchTensor(args.model_type, norm=255, caffe_pretrain=args.arch == 'BNInception'),
+        ToTorchTensor(args.model_type, norm=norm_value, caffe_pretrain=args.arch == 'BNInception'),
         norm_method, 
     ])
 

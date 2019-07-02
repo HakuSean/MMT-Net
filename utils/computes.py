@@ -85,7 +85,7 @@ def f1_score(outputs, targets, compute=1, delta=1e-11):
     return precision, recall, F1, specificity
 
 
-def create_logger(log_path, name):
+def create_logger(log_path, name, runtime=True):
     # define format
     formatter = logging.Formatter('%(asctime)s - %(message)s')
 
@@ -94,7 +94,10 @@ def create_logger(log_path, name):
     clogger.setLevel(logging.INFO)
 
     # add file handler
-    handler = logging.FileHandler(os.path.join(log_path, '{}_{}.log'.format(name, time.strftime('%b%d-%H%M')))) 
+    if runtime:
+        handler = logging.FileHandler(os.path.join(log_path, '{}_{}.log'.format(name, time.strftime('%b%d-%H%M')))) 
+    else:
+        handler = logging.FileHandler(os.path.join(log_path, '{}.log'.format(name)))        
     handler.setFormatter(formatter)
     clogger.addHandler(handler)
 

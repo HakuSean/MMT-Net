@@ -45,7 +45,7 @@ if __name__ == '__main__':
     # input label files or one single case
     if os.path.exists(os.path.join(args.annotation_path, args.dataset, 'validation.txt')):
         test_list = os.path.join(args.annotation_path, args.dataset, 'validation.txt')
-    elif ' ' in args.dataset:
+    elif ' ' in args.dataset or os.path.exists(args.dataset):
         test_list = args.dataset # one single case
     else:
         raise ValueError("Input should be a list file or a \"path frames label\" combination.")
@@ -54,12 +54,12 @@ if __name__ == '__main__':
     if args.tag:
         args.tag = '_' + args.tag
 
-    outpath = os.path.join(args.result_path, args.dataset + args.tag)
+    outpath = os.path.join(args.result_path, 'test')
     if not os.path.exists(outpath):
         os.makedirs(outpath)
     
     # set name of logs
-    test_logger = create_logger(outpath, 'test')
+    test_logger = create_logger(outpath, args.dataset.split('/')[-1] + args.tag, runtime=False)
     test_logger.info('Using model {}'.format(args.test_models))
     test_logger.info('Using weights {}'.format(score_weights))
 

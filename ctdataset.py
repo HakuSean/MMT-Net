@@ -120,11 +120,8 @@ class CTDataSet(data.Dataset):
         self.class_count = {i: 0 for i in range(self.num_classes)} # prepare for weighted sampler
 
         for x in open(self.list_file):
-            row = x.strip().split(' ') # three components: path, frames, label
-
-            # total number of nifti is always 170
-            if self.input_format in ['nifti', 'nii', 'nii.gz'] and int(row[1]) >= 170:
-                row[1] = '170'
+            # three components: path, frames, label
+            row = self._parse_row(x)
                 
             # num_classes:
             if int(row[-1]) >= self.num_classes:
@@ -136,17 +133,25 @@ class CTDataSet(data.Dataset):
             self.class_count[int(row[-1])] += 1
 
     def _parse_case(self):
-        row = self.list_file.split(' ') # two components: path, frames
-
-        # make a fake class number
-        if len(row) < 3:
-            row.append('0') # this is only used to hold place
-        
-        # total number of nifti is always 170
-        if self.input_format in ['nifti', 'nii', 'nii.gz'] and int(row[1]) >= 170:
-            row[1] = '170'
+        row = self._parse_row(self.list_file)
 
         self.ct_list = [CTRecord(row)]
+
+    def _parse_row(self, row):
+        row = row.strip().split(' - ')[1].split(' ') # deal with logs
+        print(row)
+        if len(row) == 2:
+            row.append(0) # consider it has no ground truth label
+        elif len(row) == 1:
+            if self.input_format in ['dcm', 'dicom', 'jpg', 'tif']:
+                row.append(len(next(os.walk(row[0], topdown=False))[0]))
+                row.append(0) # place holder for label
+
+        # total number of nifti is always 170
+        if self.input_format in ['nifti', 'nii', 'nii.gz'] and int(row[1]) >= 170:
+            row[1] = 170
+
+        return row
 
     def __getitem__(self, index):
         record = self.ct_list[index]

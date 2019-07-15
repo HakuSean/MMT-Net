@@ -46,7 +46,7 @@ class CTDataSet(data.Dataset):
         if input_format == 'jpg':
             self.image_tmpl = 'img{}_{:05d}.jpg'
 
-        if os.path.exists(list_file):
+        if os.path.isfile(list_file):
             self._parse_list()
         else:
             self._parse_case()
@@ -59,7 +59,7 @@ class CTDataSet(data.Dataset):
         #     if not idx % 100:
         #         print('Load data [{}/{}]'.format(idx, len(self.ct_list)))
 
-    def _load_images(self, directory, indices=None):
+    def _load_images(self, record, indices=None):
         '''
         input:
             directory of the study, or file name of nifti.
@@ -74,6 +74,8 @@ class CTDataSet(data.Dataset):
             if input_format is dicom: need to conduct slope and intercept to all images
         '''
         samples = list()
+        directory = record.path
+
         if self.input_format == 'jpg':
             for idx in indices:
                 imgs = np.array([np.array(Image.open(os.path.join(directory, self.image_tmpl.format(0, idx + i)))) for i in range(self.sample_thickness)])
@@ -81,14 +83,23 @@ class CTDataSet(data.Dataset):
 
         elif self.input_format in set(['dcm', 'dicom']):
             # need to read dicoms and conduct windows, this is mainly designed for testing
-
             reader = sitk.ImageSeriesReader()
             reader.MetaDataDictionaryArrayUpdateOn()
             dicom_names = reader.GetGDCMSeriesFileNames(next(os.walk(directory, topdown=False))[0])
 
+            # run temporal_transform again if numbers are not the same
+            if not len(dicom_names) == record.num_slices:
+                print(record.path)
+                record = CTRecord([record.path, len(dicom_names), record.label])
+                indices = self.temporal_transform(record)
+
             for idx in indices:
                 reader.SetFileNames(dicom_names[idx:idx + self.sample_thickness])
-                imgs = sitk.GetArrayFromImage(reader.Execute())
+                try:
+                    imgs = sitk.GetArrayFromImage(reader.Execute())
+                except RuntimeError:
+                    print('Slice {} is beyond length of {}.'.format(directory, idx))
+                    break
 
                 # Get window info. Rescale intercept has been considered.
                 # 0028,1050 -- Window Center
@@ -138,14 +149,16 @@ class CTDataSet(data.Dataset):
         self.ct_list = [CTRecord(row)]
 
     def _parse_row(self, row):
-        row = row.strip().split(' - ')[1].split(' ') # deal with logs
-        print(row)
-        if len(row) == 2:
-            row.append(0) # consider it has no ground truth label
-        elif len(row) == 1:
-            if self.input_format in ['dcm', 'dicom', 'jpg', 'tif']:
-                row.append(len(next(os.walk(row[0], topdown=False))[0]))
+        row = row.strip().split(' - ')[-1].split(' ') # deal with logs
+
+        if self.input_format in ['dcm', 'dicom', 'jpg', 'tif']:
+            if len(row) == 2: # consider it has no num_frame
+                row.insert(1, len(os.listdir(next(os.walk(row[0], topdown=False))[0]))) 
+            elif len(row) == 1: # usually knows nothing except for filename, i.e. test cases
+                row.append(len(os.listdir(next(os.walk(row[0], topdown=False))[0])))
                 row.append(0) # place holder for label
+            elif row[1] == '-1':
+                row[1] = len(os.listdir(next(os.walk(row[0], topdown=False))[0])) 
 
         # total number of nifti is always 170
         if self.input_format in ['nifti', 'nii', 'nii.gz'] and int(row[1]) >= 170:
@@ -156,7 +169,7 @@ class CTDataSet(data.Dataset):
     def __getitem__(self, index):
         record = self.ct_list[index]
         segment_indices = self.temporal_transform(record)
-        images = self._load_images(record.path, segment_indices)
+        images = self._load_images(record, segment_indices)
 
         return self.spatial_transform(images), record.label
 

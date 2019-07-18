@@ -151,18 +151,23 @@ class CTDataSet(data.Dataset):
     def _parse_row(self, row):
         row = row.strip().split(' - ')[-1].split(' ') # deal with logs
 
-        if self.input_format in ['dcm', 'dicom', 'jpg', 'tif']:
-            if len(row) == 2: # consider it has no num_frame
+        if len(row) == 2: # consider it has no num_frame
+            if self.input_format in ['nifti', 'nii', 'nii.gz']:
+                row.insert(1, sitk.ReadImage(row[0] +'.nii.gz').GetSize()[-1])
+            else:
                 row.insert(1, len(os.listdir(next(os.walk(row[0], topdown=False))[0]))) 
             elif len(row) == 1: # usually knows nothing except for filename, i.e. test cases
-                row.append(len(os.listdir(next(os.walk(row[0], topdown=False))[0])))
+                if self.input_format in ['nifti', 'nii', 'nii.gz']:
+                    row.append(sitk.ReadImage(row[0] +'.nii.gz').GetSize()[-1])
+                else:
+                    row.append(len(os.listdir(next(os.walk(row[0], topdown=False))[0])))
+                
                 row.append(0) # place holder for label
             elif row[1] == '-1':
-                row[1] = len(os.listdir(next(os.walk(row[0], topdown=False))[0])) 
-
-        # total number of nifti is always 170
-        if self.input_format in ['nifti', 'nii', 'nii.gz'] and int(row[1]) >= 170:
-            row[1] = 170
+                if self.input_format in ['nifti', 'nii', 'nii.gz']:
+                    row[1] = sitk.ReadImage(row[0] +'.nii.gz').GetSize()[-1]
+                else:
+                    row[1] = len(os.listdir(next(os.walk(row[0], topdown=False))[0]))
 
         return row
 

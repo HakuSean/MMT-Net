@@ -140,7 +140,7 @@ if __name__ == '__main__':
 
     # define spatial and temporal transform
     spatial_transform = transforms.Compose([
-        GroupResize(384 if args.input_format == 'nifti' else 512),
+        # GroupResize(384 if args.input_format == 'nifti' else 512),
         crop_method,
         GroupRandomRotation((20)),
         GroupRandomHorizontalFlip(),
@@ -234,7 +234,7 @@ if __name__ == '__main__':
     # --- prepare dataset (validation) --------
     # -----------------------------------------
     spatial_transform = transforms.Compose([
-        GroupResize(384 if args.input_format == 'nifti' else 512),
+        # GroupResize(384 if args.input_format == 'nifti' else 512),
         GroupCenterCrop(crop_size),
         ToTorchTensor(args.model_type, norm=norm_value, caffe_pretrain=args.arch == 'BNInception'),
         norm_method, 

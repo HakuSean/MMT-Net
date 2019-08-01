@@ -124,7 +124,7 @@ if __name__ == '__main__':
         crop_size = getattr(model.module, 'input_size', snap_opts.sample_size)
 
         spatial_transform = transforms.Compose([
-            GroupResize(384 if args.input_format == 'nifti' else 512),
+            # GroupResize(384 if args.input_format == 'nifti' else 512),
             GroupCenterCrop(crop_size),
             ToTorchTensor(snap_opts.model_type, norm=norm_value, caffe_pretrain=snap_opts.arch == 'BNInception'),
             norm_method, 

@@ -133,6 +133,10 @@ class CTDataSet(data.Dataset):
         for x in open(self.list_file):
             # three components: path, frames, label
             row = self._parse_row(x)
+
+            if not os.path.exists(row[0] +'.nii.gz') and not os.path.exists(row[0]):
+                print(row[0], 'does not exist...')
+                continue
                 
             # num_classes:
             if int(row[-1]) >= self.num_classes:
@@ -156,18 +160,18 @@ class CTDataSet(data.Dataset):
                 row.insert(1, sitk.ReadImage(row[0] +'.nii.gz').GetSize()[-1])
             else:
                 row.insert(1, len(os.listdir(next(os.walk(row[0], topdown=False))[0]))) 
-            elif len(row) == 1: # usually knows nothing except for filename, i.e. test cases
-                if self.input_format in ['nifti', 'nii', 'nii.gz']:
-                    row.append(sitk.ReadImage(row[0] +'.nii.gz').GetSize()[-1])
-                else:
-                    row.append(len(os.listdir(next(os.walk(row[0], topdown=False))[0])))
-                
-                row.append(0) # place holder for label
-            elif row[1] == '-1':
-                if self.input_format in ['nifti', 'nii', 'nii.gz']:
-                    row[1] = sitk.ReadImage(row[0] +'.nii.gz').GetSize()[-1]
-                else:
-                    row[1] = len(os.listdir(next(os.walk(row[0], topdown=False))[0]))
+        elif len(row) == 1: # usually knows nothing except for filename, i.e. test cases
+            if self.input_format in ['nifti', 'nii', 'nii.gz']:
+                row.append(sitk.ReadImage(row[0] +'.nii.gz').GetSize()[-1])
+            else:
+                row.append(len(os.listdir(next(os.walk(row[0], topdown=False))[0])))
+            
+            row.append(0) # place holder for label
+        elif row[1] == '-1':
+            if self.input_format in ['nifti', 'nii', 'nii.gz']:
+                row[1] = sitk.ReadImage(row[0] +'.nii.gz').GetSize()[-1]
+            else:
+                row[1] = len(os.listdir(next(os.walk(row[0], topdown=False))[0]))
 
         return row
 

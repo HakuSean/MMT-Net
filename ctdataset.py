@@ -9,42 +9,46 @@ import random
 import SimpleITK as sitk
 
 class CTRecord(object):
+    '''
+    Input: 
+        row: should be a list of strings, at least one component
+    '''
     def __init__(self, row):
         self._data = row
+        self._num_slices = int(row[1]) if len(row) == 3 else -1
 
     @property
     def path(self):
         return self._data[0]
 
     @property
-    def num_slices(self):
-        return int(self._data[1])
+    def label(self):
+        return int(self._data[-1]) if len(self._data) > 1 else 0
 
     @property
-    def label(self):
-        return int(self._data[2])
+    def num_slices(self):
+        return self._num_slices
+
+    @num_slices.setter
+    def num_slices(self, value):
+        if self._num_slices == -1 and value > 0:
+            self._num_slices = value
 
 
 class CTDataSet(data.Dataset):
-    def __init__(self, list_file,
-                 sample_thickness=1, 
-                 input_format='jpg',
-                 spatial_transform=None, temporal_transform=None,
-                 registration=False):
+    def __init__(self, list_file, opts,
+                 spatial_transform=None, temporal_transform=None):
 
         self.list_file = list_file # input file list, use space as delimiter: path, num_slices, label (0, 1, 2, ...)
         # self.num_segments = num_segments # used in TemporalSegmentCrop
-        self.sample_thickness = sample_thickness # whether to consider multiple slices at each sampling point
+        self.sample_thickness = opts.sample_thickness# whether to consider multiple slices at each sampling point
 
         # self.sample_step = sample_step # used in TemporalStepCrop and TemporalRandomStep
         self.spatial_transform = spatial_transform
         self.temporal_transform = temporal_transform
-        self.num_classes = 2 # dataset feature useful for model
-        self.input_format = input_format
-        self.registration = registration
-
-        if input_format == 'jpg':
-            self.image_tmpl = 'img{}_{:05d}.jpg'
+        self.num_classes = opts.n_classes
+        self.input_format = opts.input_format 
+        self.registration = opts.registration
 
         if os.path.isfile(list_file):
             self._parse_list()
@@ -77,8 +81,19 @@ class CTDataSet(data.Dataset):
         directory = record.path
 
         if self.input_format == 'jpg':
+            # first get all file names under folder
+            jpg_names = os.listdir(directory)
+            jpg_names.sort()
+
+            # record slice number
+            if record.num_slices == -1:
+                record.num_slices = len(jpg_names)
+
+            # select slices from jpg files
+            indices = self.temporal_transform(record)
+
             for idx in indices:
-                imgs = np.array([np.array(Image.open(os.path.join(directory, self.image_tmpl.format(0, idx + i)))) for i in range(self.sample_thickness)])
+                imgs = np.array([np.array(Image.open(os.path.join(directory, jpg_names[idx + i]))) for i in range(self.sample_thickness)])
                 samples.append(Image.fromarray(imgs.mean(axis=0).astype('float32')))
 
         elif self.input_format in set(['dcm', 'dicom']):
@@ -87,11 +102,12 @@ class CTDataSet(data.Dataset):
             reader.MetaDataDictionaryArrayUpdateOn()
             dicom_names = reader.GetGDCMSeriesFileNames(next(os.walk(directory, topdown=False))[0])
 
-            # run temporal_transform again if numbers are not the same
-            if not len(dicom_names) == record.num_slices:
-                print(record.path)
-                record = CTRecord([record.path, len(dicom_names), record.label])
-                indices = self.temporal_transform(record)
+            # record slice number
+            if record.num_slices == -1 or not record.num_slices == len(dicom_names):
+                record.num_slices = len(dicom_names)
+            
+            # select dicom slices from original folder
+            indices = self.temporal_transform(record)
 
             for idx in indices:
                 reader.SetFileNames(dicom_names[idx:idx + self.sample_thickness])
@@ -116,14 +132,21 @@ class CTDataSet(data.Dataset):
                 samples.append(Image.fromarray(imgs.mean(axis=0).astype('float32')))
 
         elif self.input_format in set(['nifti', 'nii', 'nii.gz']):
-            reader = sitk.ReadImage(directory+'.nii.gz') # directory is actually the file name of nii's
+            reader = sitk.ReadImage(directory + '.' + self.input_format) # directory is actually the file name of nii's
             volume = sitk.GetArrayFromImage(reader)
+
+            # record slice number
+            if record.num_slices == -1:
+                record.num_slices = reader.GetSize()[-1]
+
+            # select slices from original nifti file
+            indices = self.temporal_transform(record)
 
             for idx in indices:
                 imgs = volume[range(idx, idx + self.sample_thickness)]
                 samples.append(Image.fromarray(imgs.mean(axis=0).astype('float32')))
-            
-        return samples
+
+        return record, samples
 
 
     def _parse_list(self):
@@ -132,53 +155,28 @@ class CTDataSet(data.Dataset):
 
         for x in open(self.list_file):
             # three components: path, frames, label
-            row = self._parse_row(x)
+            row = x.strip().split(' - ')[-1].split(' ') # deal with logs
 
-            if not os.path.exists(row[0] +'.nii.gz') and not os.path.exists(row[0]):
+            # skip cases that does not exist
+            if not os.path.exists(row[0] + '.' + self.input_format) and not os.path.exists(row[0]):
                 print(row[0], 'does not exist...')
                 continue
-                
-            # num_classes:
-            if int(row[-1]) >= self.num_classes:
-                for i in range(self.num_classes, int(row[-1]) + 1):
-                    self.class_count[i] = 0
-                self.num_classes = int(row[-1]) + 1
 
             self.ct_list.append(CTRecord(row))
             self.class_count[int(row[-1])] += 1
 
     def _parse_case(self):
-        row = self._parse_row(self.list_file)
-
+        row = self.list_file.strip().split(' - ')[-1].split(' ')
         self.ct_list = [CTRecord(row)]
 
-    def _parse_row(self, row):
-        row = row.strip().split(' - ')[-1].split(' ') # deal with logs
-
-        if len(row) == 2: # consider it has no num_frame
-            if self.input_format in ['nifti', 'nii', 'nii.gz']:
-                row.insert(1, sitk.ReadImage(row[0] +'.nii.gz').GetSize()[-1])
-            else:
-                row.insert(1, len(os.listdir(next(os.walk(row[0], topdown=False))[0]))) 
-        elif len(row) == 1: # usually knows nothing except for filename, i.e. test cases
-            if self.input_format in ['nifti', 'nii', 'nii.gz']:
-                row.append(sitk.ReadImage(row[0] +'.nii.gz').GetSize()[-1])
-            else:
-                row.append(len(os.listdir(next(os.walk(row[0], topdown=False))[0])))
-            
-            row.append(0) # place holder for label
-        elif row[1] == '-1':
-            if self.input_format in ['nifti', 'nii', 'nii.gz']:
-                row[1] = sitk.ReadImage(row[0] +'.nii.gz').GetSize()[-1]
-            else:
-                row[1] = len(os.listdir(next(os.walk(row[0], topdown=False))[0]))
-
-        return row
 
     def __getitem__(self, index):
         record = self.ct_list[index]
-        segment_indices = self.temporal_transform(record)
-        images = self._load_images(record, segment_indices)
+
+        if record.num_slices == -1: # update record for the first time input
+            self.ct_list[index], images = self._load_images(record)
+        else:
+            _, images = self._load_images(record)
 
         return self.spatial_transform(images), record.label
 

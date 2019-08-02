@@ -93,6 +93,7 @@ if __name__ == '__main__':
         checkpoint = torch.load(checkpoint)
         snap_opts = checkpoint['args']
         snap_opts.pretrain_path = ''
+        snap_opts.input_format = args.input_format
         arch = checkpoint['arch']
 
         # load model
@@ -131,7 +132,7 @@ if __name__ == '__main__':
         ])
         temporal_transform = TemporalSegmentCrop(snap_opts.n_slices, snap_opts.sample_thickness, test=True)
 
-        test_data = CTDataSet(test_list, snap_opts.sample_thickness, args.input_format, spatial_transform, temporal_transform, snap_opts.registration)
+        test_data = CTDataSet(test_list, snap_opts, spatial_transform, temporal_transform)
         test_loader = torch.utils.data.DataLoader(
             test_data,
             batch_size=1,

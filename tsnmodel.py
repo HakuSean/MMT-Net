@@ -12,9 +12,10 @@ def generate_tsn(args):
     model = CTSN(args.n_classes, args.n_slices, 
                 base_model=args.arch.replace('-', ''), 
                 channels=args.n_channels, 
-                consensus_type=args.fusion_type, dropout=args.dropout, 
+                fusion_type=args.fusion_type, dropout=args.dropout, 
                 pretrained=not args.pretrain_path == '',
-                partial_bn=not args.no_partialbn)
+                partial_bn=not args.no_partialbn,
+                attention_size=args.attention_size)
     policies = model.get_optim_policies()
     # for group in policies:
     #     print(('group: {} has {} params, lr_mult: {}, decay_mult: {}'.format(
@@ -36,21 +37,25 @@ CTSN Configurations:
 class CTSN(nn.Module):
     def __init__(self, num_class, num_segments,
                  base_model='resnet101', channels=1,
-                 consensus_type='avg', before_softmax=True,
+                 fusion_type='avg', before_softmax=True,
                  dropout=0.8, pretrained=True,
-                 partial_bn=True):
+                 partial_bn=True, attention_size=512):
         super(CTSN, self).__init__()
         self.channels = channels
         self.num_segments = num_segments
-        self.reshape = True
         self.before_softmax = before_softmax
+        self.reshape = not fusion_type == 'att'
         self.dropout = dropout
         self.pretrained = pretrained
-        if not before_softmax and consensus_type != 'avg':
+        if not before_softmax and fusion_type != 'avg':
             raise ValueError("Only avg consensus can be used after Softmax")
 
         # prepare model
         self._prepare_base_model(base_model)
+
+        # self.consensus = ConsensusModule(fusion_type)
+        self.consensus = fusion_type
+        self.attention_size = attention_size
 
         feature_dim = self._prepare_ctsn(num_class) # initialize the last layer
 
@@ -59,11 +64,7 @@ class CTSN(nn.Module):
         print("Done. CTSN model ready...")
 
         # special operations
-        # self.consensus = ConsensusModule(consensus_type)
-        self.consensus = consensus_type
-
-        if not self.before_softmax:
-            self.softmax = nn.Softmax()
+        self.softmax = nn.Softmax(dim=1)
 
         self._enable_pbn = partial_bn
         if partial_bn:
@@ -71,6 +72,12 @@ class CTSN(nn.Module):
 
     def _prepare_ctsn(self, num_class):
         feature_dim = getattr(self.base_model, self.base_model.last_layer_name).in_features
+
+        # initialize FC for attention
+        if self.consensus == 'att':
+            self.feat2att = nn.Linear(feature_dim, self.attention_size)
+            self.alpha_net = nn.Linear(self.attention_size, 1)
+
         if self.dropout == 0:
             setattr(self.base_model, self.base_model.last_layer_name, nn.Linear(feature_dim, num_class))
             self.new_fc = None
@@ -196,11 +203,15 @@ class CTSN(nn.Module):
 
         base_out = self.base_model(input.view((-1, self.channels) + input.size()[-2:]))
 
+        if self.consensus == 'att':
+            base_out = self.attention_net(base_out)
+
         if self.dropout > 0:
             base_out = self.new_fc(base_out)
 
         if not self.before_softmax:
             base_out = self.softmax(base_out)
+
         if self.reshape:
             base_out = base_out.view((-1, self.num_segments) + base_out.size()[1:])
 
@@ -213,6 +224,21 @@ class CTSN(nn.Module):
             output = base_out
 
         return output.squeeze(1)
+
+    def attention_net(self, base_out):
+        att = self.feat2att(base_out) # batch*segments, attention_size
+        att = self.alpha_net(torch.tanh(att)).view(-1, self.num_segments) # batch, segments
+
+        alphas = self.softmax(att).unsqueeze(-1) # dim means which dim adds up to 1
+
+        state = base_out.view((-1, self.num_segments) + base_out.size()[1:])
+        #print(state.size()) = (batch_size, segments, feature_dim)
+
+        attn_output = torch.sum(state * alphas, 1)
+        #print(attn_output.size()) = (batch_size, feature_dim)
+
+        return attn_output
+
 
     def _construct_ct_model(self, base_model):
         # modify the convolution layers

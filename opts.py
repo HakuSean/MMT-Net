@@ -88,6 +88,8 @@ def parse_opts():
                         help='ResNeXt cardinality')
     parser.add_argument('--n_classes', type=int, default=2,
                         help='Number of classes 3 (critical: 0, non-critical: 1, normal: 2), other wise: 0: concern, 1: non')
+    parser.add_argument('--attention_size', type=int, default=512,
+                        help='Hidden layer size of attention.')
 
     # ---------------------------------------------
     # -- Model Initialization ---------------------
@@ -148,7 +150,7 @@ def parse_opts():
                         help='The models to be used for testing, should be saved model files, i.e. .pth or .tar .')
     parser.add_argument('--concern_label', type=int, default=1,
                         help='The label for positive class.')
-    parser.add_argument('--fusion_type', type=str, default='avg', choices=['avg', 'max', 'topk'],
+    parser.add_argument('--fusion_type', type=str, default='avg', choices=['avg', 'max', 'topk', 'att'],
                         help='Fusion method for prediction scores in different frames/clips.')
     parser.add_argument('--threshold', '--th', type=float, default=0.5,
                         help='Threshold used for accuracy. Only used in Test.')

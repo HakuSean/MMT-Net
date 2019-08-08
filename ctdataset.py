@@ -163,7 +163,7 @@ class CTDataSet(data.Dataset):
                 continue
 
             self.ct_list.append(CTRecord(row))
-            self.class_count[int(row[-1])] += 1
+            self.class_count[self.ct_list[-1].label] += 1
 
     def _parse_case(self):
         row = self.list_file.strip().split(' - ')[-1].split(' ')

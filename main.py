@@ -256,8 +256,12 @@ if __name__ == '__main__':
         assert args.arch == checkpoint['arch']
 
         args.begin_epoch = checkpoint['epoch']
-        model.load_state_dict(checkpoint['state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer'])
+
+        try: # consider case with different param_groups
+            model.load_state_dict(checkpoint['state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer'])
+        except:
+            model.load_state_dict(checkpoint['state_dict'], strict=False)
 
     # =========================================
     # --- Start training / validation ---------

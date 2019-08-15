@@ -69,7 +69,8 @@ def parse_opts():
 
     parser.add_argument('--sampler', type=str, default='', choices=['weighted', 'sqrt', ''],
                         help='Use sampler to deal with unbalanced data, default as None.')
-
+    parser.add_argument('--modality', type=str, default=None, choices=['soft', 'bone', 'both'],
+                        help='Processed modality for dicom.')
 
     # ---------------------------------------------
     # -- Model Structure --------------------------

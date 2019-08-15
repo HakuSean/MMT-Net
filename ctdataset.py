@@ -49,6 +49,7 @@ class CTDataSet(data.Dataset):
         self.num_classes = opts.n_classes
         self.input_format = opts.input_format 
         self.registration = opts.registration
+        self.modality = opts.modality
 
         if os.path.isfile(list_file):
             self._parse_list()
@@ -120,10 +121,19 @@ class CTDataSet(data.Dataset):
                 # Get window info. Rescale intercept has been considered.
                 # 0028,1050 -- Window Center
                 # 0028,1051 -- Window Width
-                winCenter = float(reader.GetMetaData(0, '0028|1050').split('\\')[0])
-                winWidth = float(reader.GetMetaData(0, '0028|1051').split('\\')[0])
-     
-                 # change image pixel values
+                if not self.modality: # using default window
+                    winCenter = float(reader.GetMetaData(0, '0028|1050').split('\\')[0])
+                    winWidth = float(reader.GetMetaData(0, '0028|1051').split('\\')[0])
+                elif self.modality == 'soft':
+                    winCenter = 40 if winCenter > 250 else winCenter
+                    winWidth = 90 if winWidth > 1000 else winWidth
+                elif self.modality == 'bone':
+                    winCenter = 500 if winCenter < 250 else winCenter
+                    winWidth = 2000 if winWidth < 1000 else winWidth
+                else:
+                    raise ValueError('The input modality is unknown.')
+                
+                # change image pixel values
                 yMin = int(winCenter - 0.5 * winWidth)
                 yMax = int(winCenter + 0.5 * winWidth)
 
@@ -153,9 +163,26 @@ class CTDataSet(data.Dataset):
         self.ct_list = list()
         self.class_count = {i: 0 for i in range(self.num_classes)} # prepare for weighted sampler
 
+        max_split = 2 # at most three components
+
+        # first decide the max_split
         for x in open(self.list_file):
+            if max_split == 0:
+                break
+
             # three components: path, frames, label
-            row = x.strip().split(' - ')[-1].split(' ') # deal with logs
+            row = x.strip().split(' - ')[-1].rsplit(' ', max_split) # deal with logs
+            if len(row) <= max_split:
+                max_split = len(row) - 1
+            elif not row[-2].isdigit() and not row[-2] == '-1':
+                if not row[-1].isdigit() and not row[-1] == '-1':
+                    max_split = 0
+                else:
+                    max_split = 1
+
+        # start make row
+        for x in open(self.list_file):
+            row = x.strip().split(' - ')[-1].rsplit(' ', max_split) # deal with logs
 
             # skip cases that does not exist
             if not os.path.exists(row[0] + '.' + self.input_format) and not os.path.exists(row[0]):

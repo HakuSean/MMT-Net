@@ -118,19 +118,19 @@ class CTDataSet(data.Dataset):
                     print('Slice {} is beyond length of {}.'.format(directory, idx))
                     break
 
-                # Get window info. Rescale intercept has been considered.
+                # Get default window info. Rescale intercept has been considered.
                 # 0028,1050 -- Window Center
                 # 0028,1051 -- Window Width
-                if not self.modality: # using default window
-                    winCenter = float(reader.GetMetaData(0, '0028|1050').split('\\')[0])
-                    winWidth = float(reader.GetMetaData(0, '0028|1051').split('\\')[0])
-                elif self.modality == 'soft':
+                winCenter = float(reader.GetMetaData(0, '0028|1050').split('\\')[0])
+                winWidth = float(reader.GetMetaData(0, '0028|1051').split('\\')[0])
+                
+                if self.modality == 'soft':
                     winCenter = 40 if winCenter > 250 else winCenter
                     winWidth = 90 if winWidth > 1000 else winWidth
                 elif self.modality == 'bone':
                     winCenter = 500 if winCenter < 250 else winCenter
                     winWidth = 2000 if winWidth < 1000 else winWidth
-                else:
+                elif self.modality:
                     raise ValueError('The input modality is unknown.')
                 
                 # change image pixel values

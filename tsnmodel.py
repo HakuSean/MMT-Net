@@ -15,7 +15,7 @@ def generate_tsn(args):
                 fusion_type=args.fusion_type, dropout=args.dropout, 
                 pretrained=not args.pretrain_path == '',
                 partial_bn=not args.no_partialbn,
-                attention_size=args.attention_size)
+                attention_size=getattr(args, 'attention_size', 0))
     policies = model.get_optim_policies()
     # for group in policies:
     #     print(('group: {} has {} params, lr_mult: {}, decay_mult: {}'.format(
@@ -39,7 +39,7 @@ class CTSN(nn.Module):
                  base_model='resnet101', channels=1,
                  fusion_type='avg', before_softmax=True,
                  dropout=0.8, pretrained=True,
-                 partial_bn=True, attention_size=512):
+                 partial_bn=True, attention_size=0):
         super(CTSN, self).__init__()
         self.channels = channels
         self.num_segments = num_segments
@@ -72,11 +72,16 @@ class CTSN(nn.Module):
 
     def _prepare_ctsn(self, num_class):
         feature_dim = getattr(self.base_model, self.base_model.last_layer_name).in_features
+        std = 0.001
 
         # initialize FC for attention
         if self.consensus == 'att':
             self.feat2att = nn.Linear(feature_dim, self.attention_size)
             self.alpha_net = nn.Linear(self.attention_size, 1)
+            normal_(self.feat2att.weight, 0, std)
+            constant_(self.feat2att.bias, 0)
+            normal_(self.alpha_net.weight, 0, std)
+            constant_(self.alpha_net.bias, 0)
 
         if self.dropout == 0:
             setattr(self.base_model, self.base_model.last_layer_name, nn.Linear(feature_dim, num_class))
@@ -85,7 +90,6 @@ class CTSN(nn.Module):
             setattr(self.base_model, self.base_model.last_layer_name, nn.Dropout(p=self.dropout))
             self.new_fc = nn.Linear(feature_dim, num_class)
 
-        std = 0.001
         if self.new_fc is None:
             normal_(getattr(self.base_model, self.base_model.last_layer_name).weight, 0, std)
             constant_(getattr(self.base_model, self.base_model.last_layer_name).bias, 0)

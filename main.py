@@ -53,12 +53,16 @@ if __name__ == '__main__':
     if not os.path.exists(outpath):
         os.makedirs(outpath)
     
+    # set fusion_type
+    args.fusion_type = 'att' if args.attention_size else args.fusion_type
+
     # set name of logs
     train_logger = create_logger(outpath, 'train')
     val_logger = create_logger(outpath, 'val')
     with open(os.path.join(outpath, 'args_{}.json'.format(time.strftime('%b%d-%H%M'))), 'w') as arg_file:
         json.dump(vars(args), arg_file)
 
+    # save and print args
     train_logger.info(args)
 
     torch.manual_seed(args.manual_seed)
@@ -268,12 +272,14 @@ if __name__ == '__main__':
     # =========================================
     print('=> Initial Validation')
     best_loss, best_acc = val_epoch(args.begin_epoch, val_loader, model, criterion, args, val_logger)
+    # print(model.module.feat2att.weight)
 
     print('=> Start Training')
     for epoch in range(args.begin_epoch, args.n_epochs):
 
         train_epoch(epoch, train_loader, model, criterion, optimizer, args, train_logger)
-        
+        # print(model.module.feat2att.weight)
+
         if epoch % args.eval_freq == 0 or epoch == args.n_epochs - 1:
             val_loss, val_acc = val_epoch(epoch, val_loader, model, criterion, args, val_logger)
 

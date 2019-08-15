@@ -69,6 +69,7 @@ def get_resnet(opt):
         shortcut_type=opt.resnet_shortcut,
         sample_size=opt.sample_size,
         sample_duration=opt.n_slices,
+        attention_size=getattr(opt, 'attention_size', 0)
         )
 
 def get_wideresnet(opt):
@@ -105,13 +106,17 @@ def get_densenet(opt):
 
 
 def get_fine_tuning_parameters(model, ft_begin_index, is_densenet=False):
+    # here the model is DataParallel object, should add module to get attributes from original model
+
     if ft_begin_index == 0:
         return model.parameters()
 
     ft_module_names = []
 
-    for i in range(ft_begin_index, 5):
-        if densenet:
+    # if ft_begin_index > 0, then ignore the top several 'layers' 
+    # and also ignore the first conv1 and bn1.
+    for i in range(ft_begin_index, 5): # collect the names of layers
+        if is_densenet:
             ft_module_names.append('denseblock{}'.format(i))
             ft_module_names.append('transition{}'.format(i))
         else:
@@ -121,16 +126,24 @@ def get_fine_tuning_parameters(model, ft_begin_index, is_densenet=False):
         ft_module_names.append('norm5')
         ft_module_names.append('classifier')
     else:
-        ft_module_names.append('fc')
+        ft_module_names.append('fc')          
 
     parameters = []
     for k, v in model.named_parameters():
-        for ft_module in ft_module_names:
-            if ft_module in k:
-                parameters.append({'params': v})
-                break
+        # for attention parameters:
+        if 'feat2att.weight' in k or 'alpha_net.weight' in k:
+            parameters.append({'params': v, 'lr_mult':5 }) # give a larger rate on attention layers
+        elif 'feat2att.bias' in k or 'alpha_net.bias' in k:
+            parameters.append({'params': v, 'lr_mult':10 })
         else:
-            parameters.append({'params': v, 'lr': 0.0})
+
+            # for the rest parameters:        
+            for ft_module in ft_module_names: 
+                if ft_module in k: # k looks like : layer1.bn1.weight, so 'in' is correct
+                    parameters.append({'params': v})
+                    break
+            else:
+                parameters.append({'params': v, 'lr': 0.0}) # do not update the weights
 
     return parameters
 

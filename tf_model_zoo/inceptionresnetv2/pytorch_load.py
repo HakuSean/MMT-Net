@@ -291,7 +291,7 @@ def inceptionresnetv2(pretrained=True):
     """
     model = InceptionResnetV2()
     if pretrained:
-        model.load_state_dict(model_zoo.load_url(model_urls['imagenet']))
+        model.load_state_dict(model_zoo.load_url(model_urls['imagenet']), strict=False)
     return model
 
 

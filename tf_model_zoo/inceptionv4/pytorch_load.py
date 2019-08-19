@@ -263,7 +263,7 @@ class InceptionV4(nn.Module):
 def inceptionv4(pretrained=True):
     model = InceptionV4()
     if pretrained:
-        model.load_state_dict(model_zoo.load_url(model_urls['imagenet']))
+        model.load_state_dict(model_zoo.load_url(model_urls['imagenet']), strict=False)
     return model
 
 ######################################################################

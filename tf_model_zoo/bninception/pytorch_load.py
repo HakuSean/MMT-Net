@@ -34,7 +34,7 @@ class BNInception(nn.Module):
 
         if pretrained:
             print('Use pretrained BNInception')
-            self.load_state_dict(torch.load(weight_dir))
+            self.load_state_dict(torch.load(weight_dir), strict=False)
 
     def forward(self, input):
         data_dict = dict()

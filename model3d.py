@@ -47,7 +47,7 @@ Initializing 3D-Net with base model: {}{}
         pretrain = torch.load(opt.pretrain_path)
         assert opt.arch == pretrain['arch']
 
-        model.load_state_dict(pretrain['state_dict'])
+        model.load_state_dict(pretrain['state_dict'], strict=False)
 
     model = construct_3d_model(model, opt)
 
@@ -69,7 +69,7 @@ def get_resnet(opt):
         shortcut_type=opt.resnet_shortcut,
         sample_size=opt.sample_size,
         sample_duration=opt.n_slices,
-        attention_size=getattr(opt, 'attention_size', 0)
+        attention_size=getattr(opt, 'attention_size', 0),
         )
 
 def get_wideresnet(opt):
@@ -77,6 +77,7 @@ def get_wideresnet(opt):
         shortcut_type=opt.resnet_shortcut,
         sample_size=opt.sample_size,
         sample_duration=opt.n_slices,
+        attention_size=getattr(opt, 'attention_size', 0),
         k=opt.wide_resnet_k,
         )
 
@@ -86,6 +87,7 @@ def get_resnext(opt):
         shortcut_type=opt.resnet_shortcut,
         sample_size=opt.sample_size,
         sample_duration=opt.n_slices,
+        attention_size=getattr(opt, 'attention_size', 0),
         cardinality=opt.resnext_cardinality,
         )
 
@@ -95,6 +97,7 @@ def get_preresnet(opt):
         shortcut_type=opt.resnet_shortcut,
         sample_size=opt.sample_size,
         sample_duration=opt.n_slices,
+        attention_size=getattr(opt, 'attention_size', 0),
         )
 
 def get_densenet(opt):

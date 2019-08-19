@@ -93,6 +93,7 @@ if __name__ == '__main__':
         snap_opts = checkpoint['args']
         snap_opts.pretrain_path = ''
         snap_opts.input_format = args.input_format
+        snap_opts.modality = getattr(args, 'modality', 'soft')
         arch = checkpoint['arch']
 
         # load model

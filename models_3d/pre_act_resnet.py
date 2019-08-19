@@ -115,6 +115,7 @@ class PreActivationResNet(nn.Module):
                  sample_duration,
                  shortcut_type='B',
                  num_classes=400,
+                 attention_size=0,
                  ):
     
         # define input_mean and input_std (same as TSN)
@@ -145,6 +146,13 @@ class PreActivationResNet(nn.Module):
         self.avgpool = nn.AvgPool3d(
             (last_duration, last_size, last_size), stride=1)
         self.fc = nn.Linear(512 * block.expansion, num_classes)
+
+        # initialize FC for attention
+        if attention_size:
+            self.softmax = nn.Softmax(dim=1)
+            self.attention_size = attention_size
+            self.feat2att = nn.Linear(512 * block.expansion, self.attention_size)
+            self.alpha_net = nn.Linear(self.attention_size, 1)
 
         for m in self.modules():
             if isinstance(m, nn.Conv3d):
@@ -178,6 +186,21 @@ class PreActivationResNet(nn.Module):
 
         return nn.Sequential(*layers)
 
+    def attention_net(self, base_out):
+        # reshape original output (batch, 512, last_duration, last_size, last_size)
+        base_reshape = base_out.view(base_out.size()[:2] + (-1,))
+        base_reshape = base_reshape.permute((0, 2, 1)).contiguous() # (batch, last_duration * last_size^2, 512)
+
+        # compute attention alpha's
+        att = self.feat2att(base_reshape.view(-1, base_out.size()[1])) # batch * last_duration * last_size^2, attention_size
+        att = self.alpha_net(torch.tanh(att)).view(base_out.size()[0], -1) # batch, last_duration * last_size^2
+        alphas = self.softmax(att).unsqueeze(-1) 
+
+        # combine attention and alphas
+        attn_output = torch.sum(base_reshape * alphas, 1)
+
+        return attn_output
+
     def forward(self, x):
         x = self.conv1(x)
         x = self.bn1(x)
@@ -189,9 +212,12 @@ class PreActivationResNet(nn.Module):
         x = self.layer3(x)
         x = self.layer4(x)
 
-        x = self.avgpool(x)
+        if getattr(self, 'attention_size', 0):
+            x = self.attention_net(x)
+        else:
+            x = self.avgpool(x)
+            x = x.view(x.size(0), -1)
 
-        x = x.view(x.size(0), -1)
         x = self.fc(x)
 
         return x

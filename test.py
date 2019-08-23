@@ -91,11 +91,11 @@ if __name__ == '__main__':
         
         print('loading checkpoint {}'.format(checkpoint))
         checkpoint = torch.load(checkpoint)
-        snap_opts = checkpoint['args']
+        snap_opts = getattr(checkpoint, 'args', args)
         snap_opts.pretrain_path = ''
         snap_opts.input_format = args.input_format
         snap_opts.modality = getattr(args, 'modality', 'soft')
-        arch = checkpoint['arch']
+        snap_opts.arch = arch = checkpoint['arch']
 
         # load model
         if snap_opts.model_type == '3d':

@@ -91,7 +91,7 @@ if __name__ == '__main__':
         
         print('loading checkpoint {}'.format(checkpoint))
         checkpoint = torch.load(checkpoint)
-        snap_opts = getattr(checkpoint, 'args', args)
+        snap_opts = checkpoint.get('args', args)
         snap_opts.pretrain_path = ''
         snap_opts.input_format = args.input_format
         snap_opts.modality = getattr(args, 'modality', 'soft')
@@ -126,7 +126,7 @@ if __name__ == '__main__':
         crop_size = getattr(model.module, 'input_size', snap_opts.sample_size)
 
         spatial_transform = transforms.Compose([
-            # GroupResize(384 if args.input_format == 'nifti' else 512),
+            GroupResize(snap_opts.sample_size if snap_opts.model_type == 'tsn' and snap_opts.sample_size >= 300 else 512),  
             GroupCenterCrop(crop_size),
             ToTorchTensor(snap_opts.model_type, norm=norm_value, caffe_pretrain=snap_opts.arch == 'BNInception'),
             norm_method, 
@@ -158,8 +158,11 @@ if __name__ == '__main__':
         final_scores += w * softmax(s) # should use softmax, so the score values in different models should be comparable 
 
     # print and save predictions
-    pred_labels = (final_scores[:, 1] >= args.threshold).astype(int)
-    test_logger.info('Use >={} for non-hemorrhage (label 1).'.format(args.threshold))
+    if not args.threshold == 0.5: 
+        pred_labels = (final_scores[:, args.concern_label] >= args.threshold).astype(int)
+        test_logger.info('Use >={} for non-hemorrhage (label 1).'.format(args.threshold))
+    else:
+        pred_labels = (final_scores.argmax(axis=1))
 
     for i, label in enumerate(pred_labels):
         file = test_data.ct_list[i].path

@@ -87,10 +87,9 @@ if __name__ == '__main__':
         # -----------------------------------
 
         # load from previous stage
-        
         print('loading checkpoint {}'.format(checkpoint))
         checkpoint = torch.load(checkpoint)
-        snap_opts = getattr(checkpoint, 'args', args)
+        snap_opts = checkpoint.get('args', args)
         snap_opts.pretrain_path = ''
         snap_opts.input_format = args.input_format
         snap_opts.modality = getattr(args, 'modality', 'soft')
@@ -124,7 +123,7 @@ if __name__ == '__main__':
         crop_size = getattr(model.module, 'input_size', snap_opts.sample_size)
 
         spatial_transform = transforms.Compose([
-            # GroupResize(384 if args.input_format == 'nifti' else 512),
+            GroupResize(snap_opts.sample_size if snap_opts.model_type == 'tsn' and snap_opts.sample_size >= 300 else 512),
             GroupCenterCrop(crop_size),
             ToTorchTensor(snap_opts.model_type, norm=norm_value, caffe_pretrain=snap_opts.arch == 'BNInception'),
             norm_method, 
@@ -157,13 +156,13 @@ if __name__ == '__main__':
 
     # calculate accuracy
     ground_truth = np.array([record.label for record in eval_data.ct_list])
-    pred_labels = (final_scores[:, 1] >= args.threshold).astype(int)
+    pred_labels = (final_scores[:, args.concern_label] >= args.threshold).astype(int)
     if not args.threshold == 0.5:
         eval_logger.info('Use >={} for label 1 (usually non-hemorrhage, i.e. negative).'.format(args.threshold))
 
     acc = (ground_truth == pred_labels).sum() / len(ground_truth)
     
-    measures = f1_score(pred_labels, ground_truth, compute=0)
+    measures = f1_score(pred_labels, ground_truth, compute=args.concern_label)
         
     eval_logger.info('Final Precision (tp/tp+fp):\t{:.3f}'.format(measures[0]))
     eval_logger.info('Final Recall (tp/tp+fn):\t{:.3f}'.format(measures[1]))
@@ -182,12 +181,12 @@ if __name__ == '__main__':
         false_alarm = ['line\tid\t\tscores']
         missed = ['line\tid\t\tscores']
 
-        for i in range(len(labels)):
-            if labels[i] and not pred[i]: # 1 = non, 0 = hemo
+        for i in range(len(ground_truth)):
+            if not ground_truth[i] and pred_labels[i]: # 1 = hemo, 0 = non
                 false_alarm.append('{}\t{}\t[{:.4f} {:.4f}]'.format(
                     i+1, eval_data.ct_list[i].path.split('/')[-1], final_scores[i][0], final_scores[i][1]))
 
-            if not labels[i] and pred[i]:
+            if ground_truth[i] and not pred_labels[i]:
                 missed.append('{}\t{}\t[{:.4f} {:.4f}]'.format(
                     i+1, eval_data.ct_list[i].path.split('/')[-1], final_scores[i][0], final_scores[i][1]))
 

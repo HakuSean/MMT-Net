@@ -97,9 +97,9 @@ if __name__ == '__main__':
         criterion = nn.CrossEntropyLoss()
     elif args.loss_type == 'weighted':
         if args.n_classes == 3:
-            criterion = nn.CrossEntropyLoss(weight=torch.Tensor((1.2, 1.1, 1.7)))
+            criterion = nn.CrossEntropyLoss(weight=torch.Tensor((1., 2., 2.)))
         elif args.n_classes == 2:
-            criterion = nn.CrossEntropyLoss(weight=torch.Tensor((3., 1.))) # 0-hemo, 1-non, 0 is more penaltied because of fewer data. Or want the error in 0 is severe than error in 1, which will incur more false positive.
+            criterion = nn.CrossEntropyLoss(weight=torch.Tensor((1., 3.))) # for new lists after 0827 1-hemo, 0-non, 1 is more penaltied because of fewer data. Or want the error in 0 is severe than error in 1, which will incur more false positive.
     elif args.loss_type == 'focal':
         criterion = FocalLoss(args.n_classes)
     else:
@@ -237,15 +237,15 @@ if __name__ == '__main__':
     # -----------------------------------------
     # --- prepare dataset (validation) --------
     # -----------------------------------------
-    spatial_transform = transforms.Compose([
+    val_spatial_transform = transforms.Compose([
         GroupResize(args.sample_size if args.model_type == 'tsn' and args.sample_size >= 300 else 512),
         GroupCenterCrop(crop_size),
         ToTorchTensor(args.model_type, norm=norm_value, caffe_pretrain=args.arch == 'BNInception'),
         norm_method, 
     ])
 
-    temporal_transform = TemporalSegmentCrop(args.n_slices, args.sample_thickness, test=True)
-    validation_data = CTDataSet(val_list, args, spatial_transform, temporal_transform)
+    val_temporal_transform = TemporalSegmentCrop(args.n_slices, args.sample_thickness, test=True)
+    validation_data = CTDataSet(val_list, args, val_spatial_transform, val_temporal_transform)
     val_loader = torch.utils.data.DataLoader(
         validation_data,
         batch_size=args.batch_size,

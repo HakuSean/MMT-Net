@@ -15,7 +15,8 @@ def generate_tsn(args):
                 fusion_type=args.fusion_type, dropout=args.dropout, 
                 pretrained=not args.pretrain_path == '',
                 partial_bn=not args.no_partialbn,
-                attention_size=getattr(args, 'attention_size', 0))
+                attention_size=getattr(args, 'attention_size', 0),
+                se=args.se)
     policies = model.get_optim_policies()
     # for group in policies:
     #     print(('group: {} has {} params, lr_mult: {}, decay_mult: {}'.format(
@@ -39,7 +40,7 @@ class CTSN(nn.Module):
                  base_model='resnet101', channels=1,
                  fusion_type='avg', before_softmax=True,
                  dropout=0.8, pretrained=True,
-                 partial_bn=True, attention_size=0):
+                 partial_bn=True, attention_size=0, se=False):
         super(CTSN, self).__init__()
         self.channels = channels
         self.num_segments = num_segments
@@ -47,6 +48,7 @@ class CTSN(nn.Module):
         self.reshape = not fusion_type == 'att'
         self.dropout = dropout
         self.pretrained = pretrained
+        self.use_se = se
         if not before_softmax and fusion_type != 'avg':
             raise ValueError("Only avg consensus can be used after Softmax")
 
@@ -112,7 +114,7 @@ class CTSN(nn.Module):
 
         elif base_model == 'BNInception':
             import tf_model_zoo
-            self.base_model = getattr(tf_model_zoo, base_model)(self.pretrained)
+            self.base_model = getattr(tf_model_zoo, base_model)(self.pretrained, se=self.use_se)
             self.base_model.last_layer_name = 'last_linear'
             self.input_size = 224
             # self.input_mean = [104, 117, 128]

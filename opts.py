@@ -91,6 +91,8 @@ def parse_opts():
                         help='Number of classes 3 (critical: 0, non-critical: 1, normal: 2), other wise: 0: concern, 1: non')
     parser.add_argument('--attention_size', type=int, default=512,
                         help='Hidden layer size of attention.')
+    parser.add_argument('--se', action='store_true', default=False,
+                        help='Whether to use SE block in training. Default: False. Suggested: use SE block in finetuning.')
 
     # ---------------------------------------------
     # -- Model Initialization ---------------------

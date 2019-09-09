@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 import math
 from functools import partial
+from utils import ChannelSELayer3D
 
 __all__ = [
     'ResNet', 'resnet10', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
@@ -38,13 +39,14 @@ def downsample_basic_block(x, planes, stride):
 class BasicBlock(nn.Module):
     expansion = 1
 
-    def __init__(self, inplanes, planes, stride=1, downsample=None):
+    def __init__(self, inplanes, planes, stride=1, downsample=None, se=False):
         super(BasicBlock, self).__init__()
         self.conv1 = conv3x3x3(inplanes, planes, stride)
         self.bn1 = nn.BatchNorm3d(planes)
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = conv3x3x3(planes, planes)
         self.bn2 = nn.BatchNorm3d(planes)
+        self.se = ChannelSELayer3D(planes) if se else None
         self.downsample = downsample
         self.stride = stride
 
@@ -58,6 +60,9 @@ class BasicBlock(nn.Module):
         out = self.conv2(out)
         out = self.bn2(out)
 
+        if self.se:
+            out = self.se(out)
+
         if self.downsample is not None:
             residual = self.downsample(x)
 
@@ -70,7 +75,7 @@ class BasicBlock(nn.Module):
 class Bottleneck(nn.Module):
     expansion = 4
 
-    def __init__(self, inplanes, planes, stride=1, downsample=None):
+    def __init__(self, inplanes, planes, stride=1, downsample=None, se=False):
         super(Bottleneck, self).__init__()
         self.conv1 = nn.Conv3d(inplanes, planes, kernel_size=1, bias=False)
         self.bn1 = nn.BatchNorm3d(planes)
@@ -80,6 +85,7 @@ class Bottleneck(nn.Module):
         self.conv3 = nn.Conv3d(planes, planes * 4, kernel_size=1, bias=False)
         self.bn3 = nn.BatchNorm3d(planes * 4)
         self.relu = nn.ReLU(inplace=True)
+        self.se = ChannelSELayer3D(planes * 4, reduction) if se else None    
         self.downsample = downsample
         self.stride = stride
 
@@ -96,6 +102,9 @@ class Bottleneck(nn.Module):
 
         out = self.conv3(out)
         out = self.bn3(out)
+
+        if self.se:
+            out = self.se(out)
 
         if self.downsample is not None:
             residual = self.downsample(x)
@@ -116,6 +125,7 @@ class ResNet(nn.Module):
                  shortcut_type='B',
                  num_classes=400,
                  attention_size=0,
+                 use_se=False
                  ):
 
         # define input_mean and input_std (same as TSN)
@@ -146,14 +156,17 @@ class ResNet(nn.Module):
         self.avgpool = nn.AvgPool3d(
             (last_duration, last_size, last_size), stride=1)
         self.fc = nn.Linear(512 * block.expansion, num_classes)
+        self.use_se = use_se
 
         # initialize FC for attention
         if attention_size:
             self.softmax = nn.Softmax(dim=1)
             self.attention_size = attention_size
             self.feat2att = nn.Linear(512 * block.expansion, self.attention_size)
-            self.alpha_net = nn.Linear(self.attention_size, 1)
-
+            self.alpha_net = nn.Sequential(
+                nn.ReLU(inplace=True),
+                nn.Linear(self.attention_size, 1)
+                )
         for m in self.modules():
             if isinstance(m, nn.Conv3d):
                 m.weight = nn.init.kaiming_normal_(m.weight, mode='fan_out')
@@ -179,10 +192,10 @@ class ResNet(nn.Module):
                         bias=False), nn.BatchNorm3d(planes * block.expansion))
 
         layers = []
-        layers.append(block(self.inplanes, planes, stride, downsample))
+        layers.append(block(self.inplanes, planes, stride, downsample, self.use_se))
         self.inplanes = planes * block.expansion
         for i in range(1, blocks):
-            layers.append(block(self.inplanes, planes))
+            layers.append(block(self.inplanes, planes, se=self.use_se))
 
         return nn.Sequential(*layers)
 
@@ -193,7 +206,7 @@ class ResNet(nn.Module):
 
         # compute attention alpha's
         att = self.feat2att(base_reshape.view(-1, base_out.size()[1])) # batch * last_duration * last_size^2, attention_size
-        att = self.alpha_net(torch.tanh(att)).view(base_out.size()[0], -1) # batch, last_duration * last_size^2
+        att = self.alpha_net(att).view(base_out.size()[0], -1) # batch, last_duration * last_size^2
         alphas = self.softmax(att).unsqueeze(-1) 
 
         # combine attention and alphas

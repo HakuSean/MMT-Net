@@ -3,16 +3,19 @@ from torch import nn
 from .layer_factory import get_basic_layer, parse_expr
 import torch.utils.model_zoo as model_zoo
 import yaml
+from utils import SELayer
 
 
 class BNInception(nn.Module):
     def __init__(self, pretrained, model_path='tf_model_zoo/bninception/bn_inception.yaml', num_classes=101,
-                       weight_dir='pretrained/bn_inception_weights_pt04.pt'):
+                       weight_dir='pretrained/bn_inception_weights_pt04.pt', se=False):
         super(BNInception, self).__init__()
 
         manifest = yaml.load(open(model_path))
 
         layers = manifest['layers']
+
+        self.se = se
 
         self._channel_dict = dict()
 
@@ -31,6 +34,7 @@ class BNInception(nn.Module):
                 self._op_list.append((id, op, out_var[0], in_var))
                 channel = sum([self._channel_dict[x] for x in in_var])
                 self._channel_dict[out_var[0]] = channel
+                setattr(self, id + '_se', SELayer(channel))
 
         if pretrained:
             print('Use pretrained BNInception')
@@ -53,9 +57,10 @@ class BNInception(nn.Module):
             elif op[1] == 'InnerProduct':
                 x = data_dict[op[-1]]
                 data_dict[op[2]] = getattr(self, op[0])(x.view(x.size(0), -1))
-            else:
+            else: # for concat layer: directly concat
                 try:
-                    data_dict[op[2]] = torch.cat(tuple(data_dict[x] for x in op[-1]), 1)
+                    concats = torch.cat(tuple(data_dict[x] for x in op[-1]), 1)
+                    data_dict[op[2]] = getattr(self, op[0] + '_se')(concats) if self.se else concats
                 except:
                     for x in op[-1]:
                         print(x,data_dict[x].size())

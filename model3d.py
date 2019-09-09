@@ -47,7 +47,7 @@ Initializing 3D-Net with base model: {}{}
         pretrain = torch.load(opt.pretrain_path)
         assert opt.arch == pretrain['arch']
 
-        model.load_state_dict(pretrain['state_dict'], strict=False)
+        model.load_state_dict(pretrain['state_dict'], strict=False) # for finetuning, attention and se blocks are not used in init model
 
     model = construct_3d_model(model, opt)
 

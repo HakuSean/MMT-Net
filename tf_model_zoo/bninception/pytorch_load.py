@@ -8,14 +8,14 @@ from utils import SELayer
 
 class BNInception(nn.Module):
     def __init__(self, pretrained, model_path='tf_model_zoo/bninception/bn_inception.yaml', num_classes=101,
-                       weight_dir='pretrained/bn_inception_weights_pt04.pt', se=False):
+                       weight_dir='pretrained/bn_inception_weights_pt04.pt', use_se=False):
         super(BNInception, self).__init__()
 
         manifest = yaml.load(open(model_path))
 
         layers = manifest['layers']
 
-        self.se = se
+        self.use_se = use_se
 
         self._channel_dict = dict()
 
@@ -34,7 +34,8 @@ class BNInception(nn.Module):
                 self._op_list.append((id, op, out_var[0], in_var))
                 channel = sum([self._channel_dict[x] for x in in_var])
                 self._channel_dict[out_var[0]] = channel
-                setattr(self, id + '_se', SELayer(channel))
+                if self.use_se:
+                    setattr(self, id + '_se', SELayer(channel))
 
         if pretrained:
             print('Use pretrained BNInception')
@@ -60,7 +61,7 @@ class BNInception(nn.Module):
             else: # for concat layer: directly concat
                 try:
                     concats = torch.cat(tuple(data_dict[x] for x in op[-1]), 1)
-                    data_dict[op[2]] = getattr(self, op[0] + '_se')(concats) if self.se else concats
+                    data_dict[op[2]] = getattr(self, op[0] + '_se')(concats) if self.use_se else concats
                 except:
                     for x in op[-1]:
                         print(x,data_dict[x].size())

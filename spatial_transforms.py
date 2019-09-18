@@ -138,8 +138,10 @@ class ToTorchTensor(object):
             img = torch.from_numpy(pic).permute(2, 0, 1).contiguous()
         elif isinstance(pic, list):
             # handle image group, ie list(Image):
-            img = np.concatenate([np.expand_dims(x, 2) for x in pic], axis=2) # 512 x 512 x N(image numbers)
-            img = torch.from_numpy(img).permute(2, 0, 1).contiguous()
+            if isinstance(pic[0], Image.Image):
+                img = self.imgs2tensor(pic) # output size Nx512x512
+            else: # i.e. used FiveCrop
+                img = torch.stack([self.imgs2tensor(p) for p in pic], dim=1) # first to 5x224x224, then stack in dim 1 to 5xNx224x224
         else:
             # handle PIL Image
             img = torch.ByteTensor(torch.ByteStorage.from_buffer(pic.tobytes()))
@@ -150,7 +152,7 @@ class ToTorchTensor(object):
 
         # step 2: transpose for 3d
         if self.model_type == '3d':
-            img = img.unsqueeze(0) # add one dim for real channel, the previous num_slices will become one input for 3D Net
+            img = img.unsqueeze(img.dim() - 3) # add one dim for real channel, the previous num_slices will become one input for 3D Net
 
         # step 3: form 0-255 or 0-1
         if not self.norm: # for dicom, each case specifically
@@ -162,6 +164,14 @@ class ToTorchTensor(object):
             return img.mul(255.0)
         else:
             return img
+
+    def imgs2tensor(self, imgs):
+        '''Transfer image to torch tensor, i.e. ToTensor
+        '''
+        img = np.concatenate([np.expand_dims(x, 2) for x in imgs], axis=2) # 512 x 512 x N(image numbers)
+        img = torch.from_numpy(img).permute(2, 0, 1).contiguous()
+        return img
+
 
 # add channel-wise duplication in original Normalize
 class GroupNormalize(object):

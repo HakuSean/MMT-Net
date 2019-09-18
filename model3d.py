@@ -70,6 +70,7 @@ def get_resnet(opt):
         sample_size=opt.sample_size,
         sample_duration=opt.n_slices,
         attention_size=getattr(opt, 'attention_size', 0),
+        use_se=getattr(opt, 'use_se', True)
         )
 
 def get_wideresnet(opt):

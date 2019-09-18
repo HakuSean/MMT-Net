@@ -124,7 +124,7 @@ if __name__ == '__main__':
 
         spatial_transform = transforms.Compose([
             GroupResize(snap_opts.sample_size if snap_opts.model_type == 'tsn' and snap_opts.sample_size >= 300 else 512),
-            GroupCenterCrop(crop_size),
+            GroupFiveCrop(crop_size),
             ToTorchTensor(snap_opts.model_type, norm=norm_value, caffe_pretrain=snap_opts.arch == 'BNInception'),
             norm_method, 
         ])
@@ -152,13 +152,15 @@ if __name__ == '__main__':
     # score_aggregation
     final_scores = np.zeros_like(scores)
     for s, w in zip(score_lists, score_weights):
-        final_scores += w * softmax(s) # should use softmax, so the score values in different models should be comparable 
+        final_scores += w * softmax(s) # should use softmax, so the score values in different models should be comparable
+
+    args.threshold = args.threshold * len(score_weights)
 
     # calculate accuracy
     ground_truth = np.array([record.label for record in eval_data.ct_list])
     pred_labels = (final_scores[:, args.concern_label] >= args.threshold).astype(int)
-    if not args.threshold == 0.5:
-        eval_logger.info('Use >={} for label 1 (usually non-hemorrhage, i.e. negative).'.format(args.threshold))
+    if not args.threshold == 0.5 * len(score_weights):
+        eval_logger.info('Use >={} for label 1 (usually hemorrhage, i.e. positive).'.format(args.threshold))
 
     acc = (ground_truth == pred_labels).sum() / len(ground_truth)
     

@@ -39,14 +39,14 @@ def downsample_basic_block(x, planes, stride):
 class BasicBlock(nn.Module):
     expansion = 1
 
-    def __init__(self, inplanes, planes, stride=1, downsample=None, se=False):
+    def __init__(self, inplanes, planes, stride=1, downsample=None, use_se=False):
         super(BasicBlock, self).__init__()
         self.conv1 = conv3x3x3(inplanes, planes, stride)
         self.bn1 = nn.BatchNorm3d(planes)
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = conv3x3x3(planes, planes)
         self.bn2 = nn.BatchNorm3d(planes)
-        self.se = ChannelSELayer3D(planes) if se else None
+        self.se = ChannelSELayer3D(planes) if use_se else None
         self.downsample = downsample
         self.stride = stride
 
@@ -75,7 +75,7 @@ class BasicBlock(nn.Module):
 class Bottleneck(nn.Module):
     expansion = 4
 
-    def __init__(self, inplanes, planes, stride=1, downsample=None, se=False):
+    def __init__(self, inplanes, planes, stride=1, downsample=None, use_se=False):
         super(Bottleneck, self).__init__()
         self.conv1 = nn.Conv3d(inplanes, planes, kernel_size=1, bias=False)
         self.bn1 = nn.BatchNorm3d(planes)
@@ -85,7 +85,7 @@ class Bottleneck(nn.Module):
         self.conv3 = nn.Conv3d(planes, planes * 4, kernel_size=1, bias=False)
         self.bn3 = nn.BatchNorm3d(planes * 4)
         self.relu = nn.ReLU(inplace=True)
-        self.se = ChannelSELayer3D(planes * 4, reduction) if se else None    
+        self.se = ChannelSELayer3D(planes * 4, reduction) if use_se else None    
         self.downsample = downsample
         self.stride = stride
 
@@ -131,7 +131,8 @@ class ResNet(nn.Module):
         # define input_mean and input_std (same as TSN)
         self.input_mean = [0.5]
         self.input_std = [0.226]
-        
+        self.use_se = use_se
+
         self.inplanes = 64
         super(ResNet, self).__init__()
         self.conv1 = nn.Conv3d(
@@ -156,7 +157,6 @@ class ResNet(nn.Module):
         self.avgpool = nn.AvgPool3d(
             (last_duration, last_size, last_size), stride=1)
         self.fc = nn.Linear(512 * block.expansion, num_classes)
-        self.use_se = use_se
 
         # initialize FC for attention
         if attention_size:
@@ -192,10 +192,10 @@ class ResNet(nn.Module):
                         bias=False), nn.BatchNorm3d(planes * block.expansion))
 
         layers = []
-        layers.append(block(self.inplanes, planes, stride, downsample, self.use_se))
+        layers.append(block(self.inplanes, planes, stride, downsample, use_se=self.use_se))
         self.inplanes = planes * block.expansion
         for i in range(1, blocks):
-            layers.append(block(self.inplanes, planes, se=self.use_se))
+            layers.append(block(self.inplanes, planes, use_se=self.use_se))
 
         return nn.Sequential(*layers)
 

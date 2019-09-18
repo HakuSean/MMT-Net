@@ -127,7 +127,7 @@ if __name__ == '__main__':
 
         spatial_transform = transforms.Compose([
             GroupResize(snap_opts.sample_size if snap_opts.model_type == 'tsn' and snap_opts.sample_size >= 300 else 512),  
-            GroupCenterCrop(crop_size),
+            GroupFiveCrop(crop_size),
             ToTorchTensor(snap_opts.model_type, norm=norm_value, caffe_pretrain=snap_opts.arch == 'BNInception'),
             norm_method, 
         ])

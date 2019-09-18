@@ -94,7 +94,9 @@ def val_epoch(epoch, data_loader, model, criterion, opt, logger):
             if torch.cuda.is_available():
                 inputs, targets = inputs.cuda(), targets.cuda()
 
-            outputs = model(inputs)
+            outputs = model(inputs.view((-1,) + inputs.shape[-3:])) if opt.model_type == 'tsn' else model(inputs.view((-1,) + inputs.shape[-4:]))
+            outputs = outputs.view(len(targets), -1, outputs.shape[-1]).mean(dim=1)  # max(dim=1)[0] or mean(dim=1)
+
             loss = criterion(outputs, targets)
             losses.update(loss.item(), inputs.size(0))
 
@@ -143,7 +145,9 @@ def evaluate_model(data_loader, model, opt, logger, concern_label=1):
                 inputs = inputs.cuda()
                 targets = targets[0].unsqueeze(0).cuda()
 
-            outputs = model(inputs)
+            outputs = model(inputs.view((-1,) + inputs.shape[-3:])) if opt.model_type == 'tsn' else model(inputs.view((-1,) + inputs.shape[-4:]))
+            outputs = outputs.view(len(targets), -1, outputs.shape[-1]).mean(dim=1)  # max(dim=1)[0] or mean(dim=1)
+
             batch_time.update(time.time() - end_time)
             end_time = time.time()
             
@@ -195,8 +199,8 @@ def predict(data_loader, model, opt, concern_label=1):
                 inputs = inputs.cuda()
                 targets = targets[0].unsqueeze(0).cuda()
 
-            outputs = model(inputs)
-            # pred = outputs.argmax().item()
+            outputs = model(inputs.view((-1,) + inputs.shape[-3:])) if opt.model_type == 'tsn' else model(inputs.view((-1,) + inputs.shape[-4:]))
+            outputs = outputs.view(len(targets), -1, outputs.shape[-1]).mean(dim=1)  # max(dim=1)[0] or mean(dim=1)
             
             outputs_score.append([round(s.item(), 4) for s in outputs.cpu()[0]])
 

@@ -5,7 +5,7 @@ import time
 import os
 import ipdb
 
-from utils import AverageMeter, calculate_accuracy, f1_score
+from utils import AverageMeter, calculate_accuracy, f1_score, fuse_2d
 
 
 def train_epoch(epoch, data_loader, model, criterion, optimizer, opt, logger):
@@ -145,8 +145,17 @@ def evaluate_model(data_loader, model, opt, logger, concern_label=1):
                 inputs = inputs.cuda()
                 targets = targets[0].unsqueeze(0).cuda()
 
-            outputs = model(inputs.view((-1,) + inputs.shape[-3:])) if opt.model_type == 'tsn' else model(inputs.view((-1,) + inputs.shape[-4:]))
-            outputs = outputs.view(len(targets), -1, outputs.shape[-1]).mean(dim=1)  # max(dim=1)[0] or mean(dim=1)
+            # for 3D models, use FiveCrop and mean on each
+            # The outputs are only fc outputs (without softmax)
+            if opt.model_type == 'tsn':
+                outputs = model(inputs.view((-1,) + inputs.shape[-3:]))
+                outputs = outputs.view(len(targets), -1, outputs.shape[-1]).mean(dim=1)  # max(dim=1)[0] or mean(dim=1)
+            elif opt.model_type == '3d':
+                outputs = model(inputs.view((-1,) + inputs.shape[-4:]))
+                outputs = outputs.view(len(targets), -1, outputs.shape[-1]).mean(dim=1)  # max(dim=1)[0] or mean(dim=1)
+            else: # for 2d: output should be fused into one result
+                outputs = model(inputs.squeeze())
+                outputs = fuse_2d(outputs, thresh=0.025)
 
             batch_time.update(time.time() - end_time)
             end_time = time.time()
@@ -199,9 +208,16 @@ def predict(data_loader, model, opt, concern_label=1):
                 inputs = inputs.cuda()
                 targets = targets[0].unsqueeze(0).cuda()
 
-            outputs = model(inputs.view((-1,) + inputs.shape[-3:])) if opt.model_type == 'tsn' else model(inputs.view((-1,) + inputs.shape[-4:]))
-            outputs = outputs.view(len(targets), -1, outputs.shape[-1]).mean(dim=1)  # max(dim=1)[0] or mean(dim=1)
-            
+            if opt.model_type == 'tsn':
+                outputs = model(inputs.view((-1,) + inputs.shape[-3:]))
+                outputs = outputs.view(len(targets), -1, outputs.shape[-1]).mean(dim=1)  # max(dim=1)[0] or mean(dim=1)
+            elif opt.model_type == '3d':
+                outputs = model(inputs.view((-1,) + inputs.shape[-4:]))
+                outputs = outputs.view(len(targets), -1, outputs.shape[-1]).mean(dim=1)  # max(dim=1)[0] or mean(dim=1)
+            else: # for 2d: output should be fused into one result
+                outputs = model(inputs.squeeze())
+                outputs = fuse_2d(outputs, thresh=0.025)
+
             outputs_score.append([round(s.item(), 4) for s in outputs.cpu()[0]])
 
     return outputs_score

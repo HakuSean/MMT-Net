@@ -50,6 +50,7 @@ class CTDataSet(data.Dataset):
         self.input_format = opts.input_format 
         self.registration = opts.registration
         self.modality = opts.modality
+        self.model_type = opts.model_type # used for the different preprocessing methods for 2D model
 
         if os.path.isfile(list_file):
             self._parse_list()
@@ -107,39 +108,56 @@ class CTDataSet(data.Dataset):
             if record.num_slices == -1 or not record.num_slices == len(dicom_names):
                 record.num_slices = len(dicom_names)
             
-            # select dicom slices from original folder
-            indices = self.temporal_transform(record)
+            # add an option for 2D slice prediction
+            if self.model_type == '2d':
+                reader.SetFileNames(dicom_names)
+                imgs = sitk.GetArrayFromImage(reader.Execute())
 
-            for idx in indices:
-                reader.SetFileNames(dicom_names[idx:idx + self.sample_thickness])
-                try:
-                    imgs = sitk.GetArrayFromImage(reader.Execute())
-                except RuntimeError:
-                    print('Slice {} is beyond length of {}.'.format(directory, idx))
-                    break
+                _, h, w = imgs.shape
+                windows = [(20, 60), (0, 100), (40, 80)]
 
-                # Get default window info. Rescale intercept has been considered.
-                # 0028,1050 -- Window Center
-                # 0028,1051 -- Window Width
-                winCenter = float(reader.GetMetaData(0, '0028|1050').split('\\')[0])
-                winWidth = float(reader.GetMetaData(0, '0028|1051').split('\\')[0])
-                
-                if self.modality == 'soft':
-                    winCenter = 40 if winCenter > 250 else winCenter
-                    winWidth = 90 if winWidth > 1000 else winWidth
-                elif self.modality == 'bone':
-                    winCenter = 500 if winCenter < 250 else winCenter
-                    winWidth = 2000 if winWidth < 1000 else winWidth
-                elif self.modality:
-                    raise ValueError('The input modality is unknown.')
-                
-                # change image pixel values
-                yMin = int(winCenter - 0.5 * winWidth)
-                yMax = int(winCenter + 0.5 * winWidth)
+                for frame in imgs:
+                    output = np.zeros((h, w, 3))
+                    for idx, win in enumerate(windows):
+                        sub_img = np.clip(frame, win[0], win[1])
+                        output[:, :, idx] = sub_img
 
-                # conduct rescale and window
-                imgs = np.clip(imgs, yMin, yMax)
-                samples.append(Image.fromarray(imgs.mean(axis=0).astype('float32')))
+                    samples.append(Image.fromarray(output.astype(np.uint8)))
+
+            else:
+                # select dicom slices from original folder
+                indices = self.temporal_transform(record)
+
+                for idx in indices:
+                    reader.SetFileNames(dicom_names[idx:idx + self.sample_thickness])
+                    try:
+                        imgs = sitk.GetArrayFromImage(reader.Execute())
+                    except RuntimeError:
+                        print('Slice {} is beyond length of {}.'.format(directory, idx))
+                        break
+
+                    # Get default window info. Rescale intercept has been considered.
+                    # 0028,1050 -- Window Center
+                    # 0028,1051 -- Window Width
+                    winCenter = float(reader.GetMetaData(0, '0028|1050').split('\\')[0])
+                    winWidth = float(reader.GetMetaData(0, '0028|1051').split('\\')[0])
+                    
+                    if self.modality == 'soft':
+                        winCenter = 40 if winCenter > 250 else winCenter
+                        winWidth = 90 if winWidth > 1000 else winWidth
+                    elif self.modality == 'bone':
+                        winCenter = 500 if winCenter < 250 else winCenter
+                        winWidth = 2000 if winWidth < 1000 else winWidth
+                    elif self.modality:
+                        raise ValueError('The input modality is unknown.')
+                    
+                    # change image pixel values
+                    yMin = int(winCenter - 0.5 * winWidth)
+                    yMax = int(winCenter + 0.5 * winWidth)
+
+                    # conduct rescale and window
+                    imgs = np.clip(imgs, yMin, yMax)
+                    samples.append(Image.fromarray(imgs.mean(axis=0).astype('float32')))
 
         elif self.input_format in set(['nifti', 'nii', 'nii.gz']):
             reader = sitk.ReadImage(directory + '.' + self.input_format) # directory is actually the file name of nii's

@@ -155,8 +155,12 @@ class ToTorchTensor(object):
             img = img.unsqueeze(img.dim() - 3) # add one dim for real channel, the previous num_slices will become one input for 3D Net
 
         # step 3: form 0-255 or 0-1
+        # if norm == 1, means do nothing for normalization
         if not self.norm: # for dicom, each case specifically
-            img = img.float().sub(img.min()).div(img.max() - img.min())
+            if self.model_type == '2d':
+                img = img.float().div(255.0)
+            else:
+                img = img.float().sub(img.min()).div(img.max() - img.min())
         elif not self.norm == 1.0: # for jpg, norm = 255
             img = img.float().div(self.norm)
 
@@ -168,26 +172,31 @@ class ToTorchTensor(object):
     def imgs2tensor(self, imgs):
         '''Transfer image to torch tensor, i.e. ToTensor
         '''
-        img = np.concatenate([np.expand_dims(x, 2) for x in imgs], axis=2) # 512 x 512 x N(image numbers)
-        img = torch.from_numpy(img).permute(2, 0, 1).contiguous()
+        if self.model_type == '2d':
+            img = np.concatenate([np.expand_dims(x, 0) for x in imgs], axis=0) # N x 512 x 512 x 3
+            img = torch.from_numpy(img).permute(0, 3, 1, 2).contiguous() # N x 3 x 512 x512
+        else:
+            img = np.concatenate([np.expand_dims(x, 2) for x in imgs], axis=2) # 512 x 512 x N(image numbers)
+            img = torch.from_numpy(img).permute(2, 0, 1).contiguous() # N x 512 x 512
+
         return img
 
 
 # add channel-wise duplication in original Normalize
 class GroupNormalize(object):
     def __init__(self, mean, std):
-        self.mean = mean
-        self.std = std
+        self.mean = torch.Tensor(mean) 
+        self.std = torch.Tensor(std) 
+        if len(mean) > 1:
+            self.mean = self.mean.view(-1, 1, 1)
+            self.std = self.std.view(-1, 1, 1)
 
     def __call__(self, tensor):
         # tensor.size()[0] is the real channel, len(self.mean) is the channel of one single picture.
         # For TSN, the division is the total slice number. For 3D, the division should always be one.
-        rep_mean = self.mean * (tensor.size()[0]//len(self.mean)) 
-        rep_std = self.std * (tensor.size()[0]//len(self.std))
 
-        # TODO: make efficient
-        for t, m, s in zip(tensor, rep_mean, rep_std):
-            t.sub_(m).div_(s)
+        for t in tensor:
+            t.sub_(self.mean).div_(self.std)
 
         return tensor
 

@@ -7,18 +7,20 @@ import os
 import sys
 import numpy as np
 import time
-import pandas as pd
 
 import torch
 from torch import nn
 from torchvision import transforms
 
+from model2d import generate_2d
+from model3d import generate_3d
+from tsnmodel import generate_tsn
+
 from utils import *
 from ctdataset import CTDataSet
 from epochs import predict
 from opts import parse_opts
-from model3d import generate_3d
-from tsnmodel import generate_tsn
+
 from spatial_transforms import *
 from temporal_transforms import *
 
@@ -87,25 +89,23 @@ if __name__ == '__main__':
         # --- Prepare model -----------------
         # -----------------------------------
 
-        # load from previous stage
-        
+        # load from previous stage        
         print('loading checkpoint {}'.format(checkpoint))
         checkpoint = torch.load(checkpoint)
+
         snap_opts = checkpoint.get('args', args)
         snap_opts.pretrain_path = ''
         snap_opts.input_format = args.input_format
         snap_opts.modality = getattr(args, 'modality', 'soft')
-        snap_opts.arch = arch = checkpoint['arch']
+        snap_opts.arch = arch = checkpoint.get('arch', args.model)
 
         # load model
         if snap_opts.model_type == '3d':
-            model, parameters = generate_3d(snap_opts)
+            model, _ = generate_3d(snap_opts)
         elif snap_opts.model_type == 'tsn':
-            model, parameters = generate_tsn(snap_opts)
-        elif snap_opts.model_type == '2d':
-            model = generate_2d(snap_opts)
-        else:
-            raise ValueError("Unknown model type")
+            model, _ = generate_tsn(snap_opts)
+        else: # training using a different model and test here
+            model, snap_opts = generate_2d(snap_opts)
 
         # load model states
         model.load_state_dict(checkpoint['state_dict'])
@@ -115,22 +115,31 @@ if __name__ == '__main__':
         # -----------------------------------
 
         # prepare normalization method
-        if snap_opts.no_mean_norm and not snap_opts.std_norm:
-            norm_method = GroupNormalize([0.], [1.])
-        elif not snap_opts.std_norm:
-            norm_method = GroupNormalize(model.module.input_mean, [1.]) # by default
+        if snap_opts.model_type == '3d' or snap_opts.model_type == 'tsn':
+            if snap_opts.no_mean_norm and not snap_opts.std_norm:
+                norm_method = GroupNormalize([0.], [1.])
+            elif not snap_opts.std_norm:
+                norm_method = GroupNormalize(model.module.input_mean, [1.]) # by default
+            else:
+                norm_method = GroupNormalize(model.module.input_mean, model.module.input_std) # the model is already wrapped by DataParalell
+
+            # get input_size other wise use the sample_size
+            crop_size = getattr(model.module, 'input_size', snap_opts.sample_size)
+
+            spatial_transform = transforms.Compose([
+                GroupResize(snap_opts.sample_size if snap_opts.model_type == 'tsn' and snap_opts.sample_size >= 300 else 512),  
+                GroupFiveCrop(crop_size),
+                ToTorchTensor(snap_opts.model_type, norm=norm_value, caffe_pretrain=snap_opts.arch == 'BNInception'),
+                norm_method, 
+            ])
         else:
-            norm_method = GroupNormalize(model.module.input_mean, model.module.input_std) # the model is already wrapped by DataParalell
-
-        # get input_size other wise use the sample_size
-        crop_size = getattr(model.module, 'input_size', snap_opts.sample_size)
-
-        spatial_transform = transforms.Compose([
-            GroupResize(snap_opts.sample_size if snap_opts.model_type == 'tsn' and snap_opts.sample_size >= 300 else 512),  
-            GroupFiveCrop(crop_size),
-            ToTorchTensor(snap_opts.model_type, norm=norm_value, caffe_pretrain=snap_opts.arch == 'BNInception'),
-            norm_method, 
-        ])
+            spatial_transform = transforms.Compose([
+                GroupResize(snap_opts.sample_size),
+                GroupCenterCrop(snap_opts.sample_size),
+                ToTorchTensor(snap_opts.model_type),
+                GroupNormalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+                ])          
+                  
         temporal_transform = TemporalSegmentCrop(snap_opts.n_slices, snap_opts.sample_thickness, test=True)
 
         test_data = CTDataSet(test_list, snap_opts, spatial_transform, temporal_transform)

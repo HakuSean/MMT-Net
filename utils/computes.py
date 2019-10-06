@@ -4,7 +4,7 @@ import logging
 import os
 import sys
 import time
-
+import torch
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -46,6 +46,19 @@ def calculate_accuracy(outputs, targets):
     n_correct_elems = correct.float().sum().item()
 
     return n_correct_elems / batch_size
+
+def fuse_2d(outputs, thresh=0.05):
+    # fuse results from frames into a volume-level score
+    binary = torch.stack((outputs[:,0], outputs[:,-1]), axis=1)
+    weights = torch.Tensor([[1. if score[1] > score[0] else 0.] for score in binary])
+    if binary.is_cuda:
+        weights = weights.cuda()
+
+    if weights.sum().item() / len(outputs) >= thresh:
+        return (weights * binary).mean(axis=0).unsqueeze(dim=0)
+    else:
+        return binary.mean(axis=0).unsqueeze(dim=0)
+
 
 # from TSN: to get topk, for multi-class classification
 def accuracy(output, target, topk=(1,)):

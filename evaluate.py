@@ -20,6 +20,8 @@ from utils import *
 from ctdataset import CTDataSet
 from epochs import evaluate_model
 from opts import parse_opts
+
+from model2d import generate_2d
 from model3d import generate_3d
 from tsnmodel import generate_tsn
 from spatial_transforms import *
@@ -45,8 +47,13 @@ if __name__ == '__main__':
         gpus = ','.join(args.gpus)
         os.environ["CUDA_VISIBLE_DEVICES"] = gpus
 
-    # input label files
-    eval_list = os.path.join(args.annotation_path, args.dataset, 'validation.txt')
+    # input label files or one single case
+    if os.path.exists(os.path.join(args.annotation_path, args.dataset, 'validation.txt')):
+        eval_list = os.path.join(args.annotation_path, args.dataset, 'validation.txt')
+    elif ' ' in args.dataset or os.path.exists(args.dataset):
+        eval_list = args.dataset # one single case
+    else:
+        raise ValueError("Input should be a list file or a \"path frames label\" combination.")
 
     # set directory to save logs and training outputs
     if args.tag:
@@ -75,7 +82,6 @@ if __name__ == '__main__':
     else:
         raise ValueError("Unknown input format type.")
 
-
     # ===================================
     # --- Each model --------------------
     # ===================================
@@ -89,21 +95,20 @@ if __name__ == '__main__':
         # load from previous stage
         print('loading checkpoint {}'.format(checkpoint))
         checkpoint = torch.load(checkpoint)
+
         snap_opts = checkpoint.get('args', args)
         snap_opts.pretrain_path = ''
         snap_opts.input_format = args.input_format
         snap_opts.modality = getattr(args, 'modality', 'soft')
-        snap_opts.arch = arch = checkpoint['arch']
+        snap_opts.arch = arch = checkpoint.get('arch', args.model)
 
         # load model
         if snap_opts.model_type == '3d':
-            model, parameters = generate_3d(snap_opts)
+            model, _ = generate_3d(snap_opts)
         elif snap_opts.model_type == 'tsn':
-            model, parameters = generate_tsn(snap_opts)
-        elif snap_opts.model_type == '2d':
-            model = generate_2d(snap_opts)
+            model, _ = generate_tsn(snap_opts)
         else:
-            raise ValueError("Unknown model type")
+            model, snap_opts = generate_2d(snap_opts)
 
         # load model states
         model.load_state_dict(checkpoint['state_dict'])
@@ -113,24 +118,35 @@ if __name__ == '__main__':
         # -----------------------------------
 
         # prepare normalization method
-        if snap_opts.no_mean_norm and not snap_opts.std_norm:
-            norm_method = GroupNormalize([0.], [1.])
-        elif not snap_opts.std_norm:
-            norm_method = GroupNormalize(model.module.input_mean, [1.]) # by default
+        if snap_opts.model_type == '3d' or snap_opts.model_type == 'tsn':
+            if snap_opts.no_mean_norm and not snap_opts.std_norm:
+                norm_method = GroupNormalize([0.], [1.])
+            elif not snap_opts.std_norm:
+                norm_method = GroupNormalize(model.module.input_mean, [1.]) # by default
+            else:
+                norm_method = GroupNormalize(model.module.input_mean, model.module.input_std) # the model is already wrapped by DataParalell
+
+            # get input_size other wise use the sample_size
+            crop_size = getattr(model.module, 'input_size', snap_opts.sample_size)
+
+            spatial_transform = transforms.Compose([
+                GroupResize(snap_opts.sample_size if snap_opts.model_type == 'tsn' and snap_opts.sample_size >= 300 else 512),
+                GroupFiveCrop(crop_size),
+                ToTorchTensor(snap_opts.model_type, norm=norm_value, caffe_pretrain=snap_opts.arch == 'BNInception'),
+                norm_method
+                ])
         else:
-            norm_method = GroupNormalize(model.module.input_mean, model.module.input_std) # the model is already wrapped by DataParalell
+            spatial_transform = transforms.Compose([
+                GroupResize(snap_opts.sample_size),
+                GroupCenterCrop(snap_opts.sample_size),
+                ToTorchTensor(snap_opts.model_type),
+                GroupNormalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+                ])
 
-        crop_size = getattr(model.module, 'input_size', snap_opts.sample_size)
-
-        spatial_transform = transforms.Compose([
-            GroupResize(snap_opts.sample_size if snap_opts.model_type == 'tsn' and snap_opts.sample_size >= 300 else 512),
-            GroupFiveCrop(crop_size),
-            ToTorchTensor(snap_opts.model_type, norm=norm_value, caffe_pretrain=snap_opts.arch == 'BNInception'),
-            norm_method, 
-        ])
         temporal_transform = TemporalSegmentCrop(snap_opts.n_slices, snap_opts.sample_thickness, test=True)
 
         eval_data = CTDataSet(eval_list, snap_opts, spatial_transform, temporal_transform)
+
         eval_loader = torch.utils.data.DataLoader(
             eval_data,
             batch_size=1,
@@ -158,7 +174,7 @@ if __name__ == '__main__':
 
     # calculate accuracy
     ground_truth = np.array([record.label for record in eval_data.ct_list])
-    pred_labels = (final_scores[:, args.concern_label] >= args.threshold).astype(int)
+    pred_labels = final_scores.argmax(axis=1)
     if not args.threshold == 0.5 * len(score_weights):
         eval_logger.info('Use >={} for label 1 (usually hemorrhage, i.e. positive).'.format(args.threshold))
 

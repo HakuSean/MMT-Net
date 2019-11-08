@@ -7,6 +7,8 @@ import torchvision
 if int(torchvision.__version__.split('.')[1]) >= 4:
     from torchvision.models import resnext101_32x8d, resnext50_32x4d
 
+from models_2d import se_resnet50, se_resnet101, se_resnext50_32x4d, se_resnext101_32x4d
+
 
 def generate_2d(opt):
     assert opt.model in [
@@ -30,7 +32,7 @@ def generate_2d(opt):
 Initializing 2D-Net with base model: {}{}
 2D-Net Configurations:
     crop_size:          {}
-        """.format(opt.model, opt.model_depth, opt.n_slices, opt.sample_size)))
+        """.format(opt.model, opt.model_depth, opt.sample_size)))
 
     # first make cuda, since pretrained model are on cuda
     model = nn.DataParallel(model).cuda()
@@ -47,12 +49,22 @@ def get_resnet(opt):
 
 def get_resnext(opt):
     if opt.model_depth == 50:
-        model_name = resnext50_32x4d
+        if opt.use_se:
+            model_name = se_resnext50_32x4d
+        else:
+            model_name = resnext50_32x4d
     elif opt.model_depth == 101:
-        model_name = resnext101_32x8d
+        if opt.use_se:
+            model_name = se_resnext101_32x4d
+        else:
+            model_name = resnext101_32x8d
 
-    return model_name(pretrained=bool(opt.pretrained))
+    model = model_name(pretrained=False)
+    model.avg_pool = nn.AdaptiveAvgPool2d(1)
+    model.last_linear = nn.Linear(model.last_linear.in_features, opt.n_classes) # original no bias=True
+    return model
 
+    
 def get_densenet(opt):
     model_name = getattr(densenet, '{}{}'.format(opt.model, opt.model_depth))
     return model_name(

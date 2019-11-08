@@ -8,6 +8,8 @@ from torch import nn
 import torchvision
 from torch.nn.init import normal_, constant_
 
+import models_2d
+
 def generate_tsn(args):
     model = CTSN(args.n_classes, args.n_slices, 
                 base_model=args.arch.replace('-', ''), 
@@ -113,8 +115,7 @@ class CTSN(nn.Module):
             self.input_std = [0.226]
 
         elif base_model == 'BNInception':
-            import tf_model_zoo
-            self.base_model = getattr(tf_model_zoo, base_model)(self.pretrained, use_se=self.use_se)
+            self.base_model = getattr(models_2d, base_model)(pretrained=self.pretrained)
             self.base_model.last_layer_name = 'last_linear'
             self.input_size = 224
             # self.input_mean = [104, 117, 128]

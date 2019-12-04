@@ -6,6 +6,9 @@ import sys
 import time
 import torch
 
+from collections import Counter
+from collections import OrderedDict
+
 class AverageMeter(object):
     """Computes and stores the average and current value"""
 
@@ -95,6 +98,7 @@ def f1_score(outputs, targets, compute=1, delta=1e-11):
     recall = float(tp)/(tp + fn + delta) # is also sensitivity
     specificity = float(tn) / ( tn + fp + delta) # if tn + fp = tp + fn, then spec = 2* acc - precision
     F1 = 2.0*precision*recall/(precision+recall+delta) 
+    print('tp: {}, tn: {}, fp: {}, fn: {}'.format(tp,tn,fp,fn))
     return precision, recall, F1, specificity
 
 
@@ -119,6 +123,22 @@ def create_logger(log_path, name, runtime=True):
     ch.setFormatter(formatter)
     clogger.addHandler(ch)
     return clogger
+
+# majority vote for cases with more that one scans
+def majority_vote(datalist, gt, pred):
+    results = OrderedDict()
+    gts = list()
+    for idx, line in enumerate(open(datalist, 'r')):
+        name = line.split(' ', 1)[0]
+        if not name in results: 
+            results[name] = [pred[idx]]
+            gts.append(gt[idx])
+        else:
+            results[name].append(pred[idx])
+
+        idx += 1
+
+    return np.array(gts), np.array([Counter(i).most_common(1)[0][0] for i in results.values()])
 
 # ----------------------------------------------------------------
 # deserted -------------------------------------------------------

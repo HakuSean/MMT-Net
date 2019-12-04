@@ -212,6 +212,10 @@ if __name__ == '__main__':
     if not args.threshold == 0.5 * len(score_weights):
         eval_logger.info('Use >={} for label 1 (usually hemorrhage).'.format(args.threshold))
 
+    # max vote for cq500:
+    if 'cq500' in args.dataset:
+        ground_truth, pred_labels = majority_vote(args.dataset, ground_truth, pred_labels)
+
     acc = (ground_truth == pred_labels).sum() / len(ground_truth)
     
     measures = f1_score(pred_labels, ground_truth, compute=args.concern_label)

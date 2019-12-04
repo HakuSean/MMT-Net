@@ -7,21 +7,21 @@ def parse_opts():
     # ---------------------------------------------
     # -- Input and Output -------------------------
     # ---------------------------------------------
-    parser.add_argument('dataset', type=str, default='ct40k',
-                        help='Used dataset, depend on tagging folder name. OR use single case for testing')
+    parser.add_argument('dataset', type=str, default='0',
+                        help='The number of split with in the 5_fold model. OR use single case for testing')
     # parser.add_argument('--ct_path', type=str, default='/home/dongang/Documents/crcp/data/', 
     #                     help='Directory path of dataset')
-    parser.add_argument('--annotation_path', type=str, default='/home/dongang/Documents/crcp/tagging/',
+    parser.add_argument('--annotation_path', type=str, default='../DataPreparation/labels/hemorrhage/5_fold',
                         help='Annotation file path')
     parser.add_argument('--result_path', type=str, default='./results',
                         help='Result directory path. ')
     parser.add_argument('--tag', type=str, default='',
                         help='Tags to distinguish from other logs/saved models. This also saves the hdf5 files for svm.')
 
-    parser.add_argument('--input_format', type=str, default='jpg', choices=['jpg', 'dicom', 'dcm', 'nii', 'nifti', 'nii.gz'],
+    parser.add_argument('--input_format', type=str, default='dcm', choices=['jpg', 'dicom', 'dcm', 'nii', 'nifti', 'nii.gz'],
                         help='Input format of the images.')    
-    parser.add_argument('--n_channels', type=int, default=1,
-                        help='Number of channels for CT. Two channels are soft and bone.')
+    parser.add_argument('--n_channels', type=int, default=3,
+                        help='Number of channels for CT. Two channels are soft and bone. Three channels are for different windows')
 
     parser.add_argument('--print_freq', type=int, default=10, 
                         help='print frequency on iterations (default: 10)')
@@ -53,12 +53,12 @@ def parse_opts():
     #                     help='Number of scales for multiscale cropping')
     # parser.add_argument('--scale_step', type=float, default=0.84089641525,
     #                     help='Scale step for multiscale cropping')
-    parser.add_argument('--spatial_crop', '--sc', type=str, default='center', choices=['random', 'five', 'center'],
-                        help= 'Spatial cropping method in training. random is uniform. five is selection from 4 corners and 1 center.  (random | five | center)')
+    parser.add_argument('--spatial_crop', '--sc', type=str, default='resize', choices=['random', 'five', 'center', 'resize'],
+                        help= 'Spatial cropping method in training. random is uniform. five is selection from 4 corners and 1 center.  (random | five | center | resize)')
     parser.add_argument('--temporal_crop', '--tc', type=str, default='segment', choices=['segment', 'jump', 'step', 'center'],
-                        help= 'Spatial cropping method in training. random is uniform. corner is selection from 4 corners and 1 center.  (random | corner | center)')
+                        help= 'Temporal cropping method in training. segment is to select slices within each segment; jump is purely random crop; step is to select slices every several slices; center is a special step where select the center several slices.  (segment | jump | step | center)')
 
-    parser.add_argument('--n_slices', type=int, default=25,
+    parser.add_argument('--n_slices', type=int, default=30,
                         help='Temporal duration of inputs. Used as num_segments for segmental input, and as the size for step input or random slices input.')
     parser.add_argument('--sample_step', type=int, default=5,
                         help='Temporal step of inputs')
@@ -87,9 +87,9 @@ def parse_opts():
                         help='Wide resnet k')
     parser.add_argument('--resnext_cardinality', type=int, default=32,
                         help='ResNeXt cardinality')
-    parser.add_argument('--n_classes', type=int, default=2,
+    parser.add_argument('--n_classes', type=int, default=8,
                         help='Number of classes 3 (critical: 0, non-critical: 1, normal: 2), other wise: 0: concern, 1: non')
-    parser.add_argument('--attention_size', type=int, default=512,
+    parser.add_argument('--attention_size', type=int, default=0,
                         help='Hidden layer size of attention.')
     parser.add_argument('--use_se', action='store_true', default=False,
                         help='Whether to use SE block in training. Default: False. Suggested: use SE block in finetuning.')
@@ -97,7 +97,7 @@ def parse_opts():
     # ---------------------------------------------
     # -- Model Initialization ---------------------
     # --------------------------------------------- 
-    parser.add_argument('--pretrain_path', type=str, default='',
+    parser.add_argument('--pretrain_path', type=str, default='imagenet',
                         help='Use the pretrained weights from ImageNet.')
     parser.add_argument('--dropout', type=float, default=0.7,
                         help='When training from pretrained, add dropout previous to an extra linear layer.')

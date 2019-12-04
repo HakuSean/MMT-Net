@@ -28,7 +28,6 @@ from spatial_transforms import *
 from temporal_transforms import *
 from utils import *
 
-
 if __name__ == '__main__':
     # set this to avoid loading memory problems
     # torch.backends.cudnn.enabled = False 
@@ -42,18 +41,18 @@ if __name__ == '__main__':
     start = time.time()
 
     # input label files
-    train_list = os.path.join(args.annotation_path, args.dataset, 'training.txt')
-    val_list = os.path.join(args.annotation_path, args.dataset, 'validation.txt')
+    train_list = os.path.join(args.annotation_path, 'training_' + args.dataset + '.txt')
+    val_list = os.path.join(args.annotation_path, 'validation_' + args.dataset + '.txt')
 
     # set directory to save logs and training outputs
     if args.tag:
         args.tag = '_' + args.tag
 
-    outpath = os.path.join(args.result_path, args.dataset + args.tag)
+    outpath = os.path.join(args.result_path, 'split_' + args.dataset + args.tag)
     if not os.path.exists(outpath):
         os.makedirs(outpath)
     
-    # set fusion_type
+    # set fusion_type. Default: no attention
     args.fusion_type = 'att' if args.attention_size else args.fusion_type
 
     # set name of logs
@@ -71,7 +70,7 @@ if __name__ == '__main__':
     # -----------------------------------
     # --- prepare model -----------------
     # -----------------------------------
-    if args.model == 'BNInception':
+    if 'inception' in args.model:
         args.arch = args.model
     elif args.model == 'svm':
         print('Please use train_svm.py')
@@ -88,20 +87,18 @@ if __name__ == '__main__':
     else:
         raise ValueError("Unknown model type")
 
-    # print(model)
-
     # -----------------------------------
     # --- prepare loss function ---------
     # -----------------------------------
     if args.loss_type == 'nll':
-        criterion = nn.CrossEntropyLoss()
+        criterion = nn.BCEWithLogitsLoss()
     elif args.loss_type == 'weighted':
-        if args.n_classes == 3:
-            criterion = nn.CrossEntropyLoss(weight=torch.Tensor((1., 2., 2.)))
-        elif args.n_classes == 2:
-            criterion = nn.CrossEntropyLoss(weight=torch.Tensor((1., 3.))) # for new lists after 0827 1-hemo, 0-non, 1 is more penaltied because of fewer data. Or want the error in 0 is severe than error in 1, which will incur more false positive.
+        weight_tensor = torch.tensor([0.5, 2, 0.5, 1, 1, 1, 1, 1], dtype=torch.float)
+        criterion = nn.BCEWithLogitsLoss(pos_weight=weight_tensor)
+        # criterion = BCEWithLogitsWeightedLoss(args.n_classes, class_weight=weight_tensor)
     elif args.loss_type == 'focal':
-        criterion = FocalLoss(args.n_classes)
+        weight_tensor = torch.tensor([1, 2, 1, 1, 1, 1, 1, 1], dtype=torch.float)
+        criterion = MultiLabelFocalLoss(args.n_classes, alpha=weight_tensor)
     else:
         raise ValueError("Unknown loss type")
 
@@ -118,9 +115,9 @@ if __name__ == '__main__':
     if args.no_mean_norm and not args.std_norm:
         norm_method = GroupNormalize([0.], [1.])
     elif not args.std_norm:
-        norm_method = GroupNormalize(model.module.input_mean, [1.]) # by default
+        norm_method = GroupNormalize(model.input_mean, [1.]) # by default
     else:
-        norm_method = GroupNormalize(model.module.input_mean, model.module.input_std) # the model is already wrapped by DataParalell
+        norm_method = GroupNormalize(model.input_mean, model.input_std) # the model is already wrapped by DataParalell
 
     # prepare for value range
     if args.input_format == 'jpg':
@@ -133,9 +130,11 @@ if __name__ == '__main__':
         raise ValueError("Unknown input format type.")
 
     # prepare for crop
-    crop_size = getattr(model.module, 'input_size', args.sample_size)
-    assert args.spatial_crop in ['random', 'five', 'center']
-    if args.spatial_crop == 'random':
+    crop_size = getattr(model, 'input_size', args.sample_size)
+    assert args.spatial_crop in ['random', 'five', 'center', 'resize']
+    if args.spatial_crop == 'resize':
+        crop_method = GroupRandomResizedCrop(crop_size)
+    elif args.spatial_crop == 'random':
         crop_method = GroupRandomCrop(crop_size)
     elif args.spatial_crop == 'five':
         crop_method = GroupFiveCrop(crop_size)
@@ -144,11 +143,12 @@ if __name__ == '__main__':
 
     # define spatial and temporal transform
     spatial_transform = transforms.Compose([
-        GroupResize(args.sample_size if args.model_type == 'tsn' and args.sample_size >= 300 else 512),
+        GroupResize(args.sample_size if 'inception' in args.model and args.sample_size >= 300 else 512),
         crop_method,
-        GroupRandomRotation((20)),
+        GroupRandomRotation(30, p=0.5),
         GroupRandomHorizontalFlip(),
-        ToTorchTensor(args.model_type, norm=norm_value, caffe_pretrain=args.arch == 'BNInception'),
+        GroupRandomBrightnessContrast(brightness_limit=0.08, contrast_limit=0.08, p=0.5),
+        ToTorchTensor(args.model_type, norm=norm_value, caffe_pretrain=args.arch == 'bninception'),
         norm_method,
     ])
 
@@ -165,6 +165,9 @@ if __name__ == '__main__':
     print('Transformation Definition time: {}'.format(time.time() - start))
 
     training_data = CTDataSet(train_list, args, spatial_transform, temporal_transform)
+
+    # import ipdb
+    # ipdb.set_trace()
 
     print('Dataset Definition time: {}'.format(time.time() - start))
 
@@ -229,23 +232,18 @@ if __name__ == '__main__':
     else:
         raise ValueError("Unknown optimizer type")
 
-
-            # scheduler = lr_scheduler.ReduceLROnPlateau(
-            #     optimizer, 'min', patience=args.lr_patience)
-
-
     # -----------------------------------------
     # --- prepare dataset (validation) --------
     # -----------------------------------------
-    val_spatial_transform = transforms.Compose([
-        GroupResize(args.sample_size if args.model_type == 'tsn' and args.sample_size >= 300 else 512),
-        GroupCenterCrop(crop_size),
-        ToTorchTensor(args.model_type, norm=norm_value, caffe_pretrain=args.arch == 'BNInception'),
-        norm_method, 
-    ])
+    # val_spatial_transform = transforms.Compose([
+    #     GroupResize(args.sample_size if args.model_type == 'tsn' and args.sample_size >= 300 else 512),
+    #     GroupCenterCrop(crop_size),
+    #     ToTorchTensor(args.model_type, norm=norm_value, caffe_pretrain=args.arch == 'bninception'),
+    #     norm_method, 
+    # ])
 
     val_temporal_transform = TemporalSegmentCrop(args.n_slices, args.sample_thickness, test=True)
-    validation_data = CTDataSet(val_list, args, val_spatial_transform, val_temporal_transform)
+    validation_data = CTDataSet(val_list, args, spatial_transform, val_temporal_transform)
     val_loader = torch.utils.data.DataLoader(
         validation_data,
         batch_size=args.batch_size,
@@ -253,8 +251,19 @@ if __name__ == '__main__':
         num_workers=args.n_threads,
         pin_memory=True)
 
+    # -----------------------------------------
+    # --- prepare pretrain/resume model -------
+    # -----------------------------------------
+    # load model states if it is not imagenet
+    if os.path.isfile(args.pretrain_path):
+        print('loading pretrained model {}'.format(args.pretrain_path))
+        checkpoint = torch.load(args.pretrain_path)
+        model.load_state_dict(checkpoint['state_dict'])
+        best_loss, best_acc = checkpoint.get('best', [float('inf'), 0.])
+        print('best loss', best_loss, 'best mAP', best_acc)
+
     # load from previous stage
-    if args.resume_path:
+    elif args.resume_path:
         print('loading checkpoint {}'.format(args.resume_path))
         checkpoint = torch.load(args.resume_path)
         assert args.arch == checkpoint['arch']
@@ -267,11 +276,16 @@ if __name__ == '__main__':
         except:
             model.load_state_dict(checkpoint['state_dict'], strict=False)
 
+        best_loss, best_acc = checkpoint.get('best', [float('inf'), 0.])
+        print('best loss', best_loss, 'best mAP', best_acc)
+    else:    
+        print('=> Initial Validation')
+        best_loss, best_acc = float('inf'), 0.
+        # best_loss, best_acc = val_epoch(args.begin_epoch, val_loader, model, criterion, args, val_logger)
+
     # =========================================
     # --- Start training / validation ---------
     # =========================================
-    print('=> Initial Validation')
-    best_loss, best_acc = val_epoch(args.begin_epoch, val_loader, model, criterion, args, val_logger)
     # print(model.module.feat2att.weight)
 
     print('=> Start Training')
@@ -281,31 +295,32 @@ if __name__ == '__main__':
         # print(model.module.feat2att.weight)
 
         if epoch % args.eval_freq == 0 or epoch == args.n_epochs - 1:
+
             val_loss, val_acc = val_epoch(epoch, val_loader, model, criterion, args, val_logger)
 
             # save two models according to loss or accuracy
-            save_flag = 0
             if val_loss < best_loss:
                 print('Val loss decreases at epoch {}.'.format(epoch))
                 save_file_path = os.path.join(outpath, 'best_loss.pth')
                 best_loss = val_loss
-                save_flag = 1
             elif val_acc > best_acc:
                 print('Val accuracy increases at epoch {}.'.format(epoch))
                 best_acc = val_acc
                 save_file_path = os.path.join(outpath, 'best_acc.pth')
-                save_flag = 1
+            else:
+                # save checkpoint when nothing happens
+                print('Val accuracy/loss remains or gets worse at epoch {}.'.format(epoch))
+                save_file_path = os.path.join(outpath, 'save_{}.pth'.format(epoch))
 
-            if save_flag:
-                states = {
-                    'epoch': epoch,
-                    'arch': args.arch,
-                    'state_dict': model.state_dict(),
-                    'optimizer': optimizer.state_dict(),
-                    'best': [best_loss, best_acc],
-                    'args': args # used for ensemble predictions
-                }
-                torch.save(states, save_file_path)
+            states = {
+                'epoch': epoch,
+                'arch': args.arch,
+                'state_dict': model.state_dict(),
+                'optimizer': optimizer.state_dict(),
+                'best': [best_loss, best_acc],
+                'args': args # used for ensemble predictions
+            }
+            torch.save(states, save_file_path)
 
         # scheduler.step(validation_loss)
         learning_rate_steps(optimizer, epoch, args)

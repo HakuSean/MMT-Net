@@ -47,19 +47,23 @@ if __name__ == '__main__':
         gpus = ','.join(args.gpus)
         os.environ["CUDA_VISIBLE_DEVICES"] = gpus
 
+    # set tags to distinguish different times of running
+    if args.tag:
+        args.tag = '_' + args.tag
+
     # input label files or one single case
-    if os.path.exists(os.path.join(args.annotation_path, args.dataset, 'validation.txt')):
-        eval_list = os.path.join(args.annotation_path, args.dataset, 'validation.txt')
+    if os.path.exists(os.path.join(args.annotation_path, 'validation_' + args.dataset + '.txt')):
+        eval_list = os.path.join(args.annotation_path, 'validation_' + args.dataset + '.txt')
+        outpath = os.path.join(args.result_path, 'split_' + args.dataset + args.tag)
+
     elif ' ' in args.dataset or os.path.exists(args.dataset):
         eval_list = args.dataset # one single case
+        folder = args.dataset.rsplit('/', 1)[-1].replace('.txt', '')
+        outpath = os.path.join(args.result_path, folder + args.tag)
     else:
         raise ValueError("Input should be a list file or a \"path frames label\" combination.")
 
     # set directory to save logs and training outputs
-    if args.tag:
-        args.tag = '_' + args.tag
-
-    outpath = os.path.join(args.result_path, args.dataset + args.tag)
     if not os.path.exists(outpath):
         os.makedirs(outpath)
     
@@ -94,10 +98,10 @@ if __name__ == '__main__':
 
         # load from previous stage
         print('loading checkpoint {}'.format(checkpoint))
+        score_file = '_'.join(checkpoint.rsplit('/', 2)[-2:]).replace('.pth', '')
         checkpoint = torch.load(checkpoint)
 
         snap_opts = checkpoint.get('args', args)
-        snap_opts.pretrain_path = ''
         snap_opts.input_format = args.input_format
         snap_opts.modality = getattr(args, 'modality', 'soft')
         snap_opts.arch = arch = checkpoint.get('arch', args.model)
@@ -111,6 +115,7 @@ if __name__ == '__main__':
             model, snap_opts = generate_2d(snap_opts)
 
         # load model states
+        model = nn.DataParallel(model)
         model.load_state_dict(checkpoint['state_dict'])
 
         # -----------------------------------
@@ -154,10 +159,39 @@ if __name__ == '__main__':
             num_workers=args.n_threads,
             pin_memory=True)
 
+
+        # load scores if predicted:
+        if os.path.isfile(os.path.join(outpath, 'pred_{}.npy'.format(score_file))):
+            print('pred_{}.npy has already been predicted'.format(score_file))
+            scores = np.load(os.path.join(outpath, 'pred_{}.npy'.format(score_file)))
+            score_lists.append(np.array(scores))
+            continue
+
+        # -----------------------------------
+        # --- prepare criterion -------------
+        # -----------------------------------
+        if snap_opts.loss_type == 'nll':
+            criterion = nn.BCEWithLogitsLoss()
+        elif snap_opts.loss_type == 'weighted':
+            weight_tensor = torch.tensor([0.5, 2, 0.5, 1, 1, 1, 1, 1], dtype=torch.float)
+            criterion = nn.BCEWithLogitsLoss(pos_weight=weight_tensor)
+            # criterion = BCEWithLogitsWeightedLoss(snap_opts.n_classes, class_weight=weight_tensor)
+        elif snap_opts.loss_type == 'focal':
+            weight_tensor = torch.tensor([1, 2, 1, 1, 1, 1, 1, 1], dtype=torch.float)
+            criterion = MultiLabelFocalLoss(snap_opts.n_classes, alpha=weight_tensor)
+        else:
+            raise ValueError("Unknown loss type")
+
+        if torch.cuda.is_available():
+            criterion = criterion.cuda()
+
         print('Preparation time for {}-{} is {}'.format(arch, snap_opts.model_type, time.time() - start))
         
-        scores = evaluate_model(eval_loader, model, snap_opts, eval_logger, concern_label=args.concern_label)
+        scores = evaluate_model(eval_loader, model, criterion, snap_opts, eval_logger, concern_label=args.concern_label)
         score_lists.append(np.array(scores))
+
+        # save scores for later usage
+        np.save(os.path.join(outpath, 'pred_{}.npy'.format(score_file)), np.array(scores))
 
         print('Prediction time for {}-{} is {}'.format(arch, snap_opts.model_type, time.time() - start))
 
@@ -168,15 +202,15 @@ if __name__ == '__main__':
     # score_aggregation
     final_scores = np.zeros_like(scores)
     for s, w in zip(score_lists, score_weights):
-        final_scores += w * softmax(s) # should use softmax, so the score values in different models should be comparable
+        final_scores += w / (1 + np.exp(-s)) # should use softmax, so the score values in different models should be comparable
 
     args.threshold = args.threshold * len(score_weights)
 
     # calculate accuracy
-    ground_truth = np.array([record.label for record in eval_data.ct_list])
-    pred_labels = final_scores.argmax(axis=1)
+    ground_truth = np.array([int(record.label[1]) for record in eval_data.ct_list])
+    pred_labels = np.array([int(i >= args.threshold) for i in final_scores[:, 1]])
     if not args.threshold == 0.5 * len(score_weights):
-        eval_logger.info('Use >={} for label 1 (usually hemorrhage, i.e. positive).'.format(args.threshold))
+        eval_logger.info('Use >={} for label 1 (usually hemorrhage).'.format(args.threshold))
 
     acc = (ground_truth == pred_labels).sum() / len(ground_truth)
     

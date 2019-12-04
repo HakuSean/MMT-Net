@@ -5,6 +5,7 @@ import os
 import numpy as np
 from numpy.random import randint
 import random
+import torch
 
 import SimpleITK as sitk
 
@@ -12,9 +13,11 @@ class CTRecord(object):
     '''
     Input: 
         row: should be a list of strings, at least one component
+        num_classes: in total 9 classes (5 subtypes and non/normal/any/exclude, normal is 0)
     '''
-    def __init__(self, row):
+    def __init__(self, row, num_classes=8):
         self._data = row
+        self.num = num_classes
         self._num_slices = int(row[1]) if len(row) == 3 else -1
 
     @property
@@ -23,7 +26,17 @@ class CTRecord(object):
 
     @property
     def label(self):
-        return int(self._data[-1]) if len(self._data) > 1 else 0
+        if len(self._data) == 1:
+            return None
+
+        out = [0.] * self.num
+        tags = self._data[-1].split(',')
+        for i in tags:
+            if i == '0':
+                return out
+
+            out[int(i) - 1] = 1.
+        return out
 
     @property
     def num_slices(self):
@@ -108,56 +121,30 @@ class CTDataSet(data.Dataset):
             if record.num_slices == -1 or not record.num_slices == len(dicom_names):
                 record.num_slices = len(dicom_names)
             
-            # add an option for 2D slice prediction
-            if self.model_type == '2d':
-                reader.SetFileNames(dicom_names)
-                imgs = sitk.GetArrayFromImage(reader.Execute())
+            # select dicom slices from original folder
+            indices = self.temporal_transform(record)
 
+            for idx in indices:
+                reader.SetFileNames(dicom_names[idx:idx + self.sample_thickness])
+                try:
+                    imgs = sitk.GetArrayFromImage(reader.Execute())
+                except RuntimeError:
+                    print('Slice {} is beyond length of {}.'.format(directory, idx))
+                    break
+                
                 _, h, w = imgs.shape
-                windows = [(20, 60), (0, 100), (40, 80)]
+                windows = [(40, 80), (80, 200), (40, 380)]
+                output = np.zeros((h, w, 3)) 
 
-                for frame in imgs:
-                    output = np.zeros((h, w, 3))
+                for frame in imgs:                    
                     for idx, win in enumerate(windows):
-                        sub_img = np.clip(frame, win[0], win[1])
-                        output[:, :, idx] = sub_img
+                        yMin = int(win[0] - 0.5 * win[1])
+                        yMax = int(win[0] + 0.5 * win[1])
+                        sub_img = np.clip(frame, yMin, yMax)
+                        output[:, :, idx] += (sub_img - yMin) / (yMax - yMin) * 255
 
-                    samples.append(Image.fromarray(output.astype(np.uint8)))
+                samples.append(Image.fromarray((output/self.sample_thickness).astype(np.uint8)))
 
-            else:
-                # select dicom slices from original folder
-                indices = self.temporal_transform(record)
-
-                for idx in indices:
-                    reader.SetFileNames(dicom_names[idx:idx + self.sample_thickness])
-                    try:
-                        imgs = sitk.GetArrayFromImage(reader.Execute())
-                    except RuntimeError:
-                        print('Slice {} is beyond length of {}.'.format(directory, idx))
-                        break
-
-                    # Get default window info. Rescale intercept has been considered.
-                    # 0028,1050 -- Window Center
-                    # 0028,1051 -- Window Width
-                    winCenter = float(reader.GetMetaData(0, '0028|1050').split('\\')[0])
-                    winWidth = float(reader.GetMetaData(0, '0028|1051').split('\\')[0])
-                    
-                    if self.modality == 'soft':
-                        winCenter = 40 if winCenter > 250 else winCenter
-                        winWidth = 90 if winWidth > 1000 else winWidth
-                    elif self.modality == 'bone':
-                        winCenter = 500 if winCenter < 250 else winCenter
-                        winWidth = 2000 if winWidth < 1000 else winWidth
-                    elif self.modality:
-                        raise ValueError('The input modality is unknown.')
-                    
-                    # change image pixel values
-                    yMin = int(winCenter - 0.5 * winWidth)
-                    yMax = int(winCenter + 0.5 * winWidth)
-
-                    # conduct rescale and window
-                    imgs = np.clip(imgs, yMin, yMax)
-                    samples.append(Image.fromarray(imgs.mean(axis=0).astype('float32')))
 
         elif self.input_format in set(['nifti', 'nii', 'nii.gz']):
             reader = sitk.ReadImage(directory + '.' + self.input_format) # directory is actually the file name of nii's
@@ -179,7 +166,7 @@ class CTDataSet(data.Dataset):
 
     def _parse_list(self):
         self.ct_list = list()
-        self.class_count = {i: 0 for i in range(self.num_classes)} # prepare for weighted sampler
+        self.class_count = {i: 0 for i in range(3)} # prepare for weighted sampler
 
         max_split = 2 # at most three components
 
@@ -208,7 +195,16 @@ class CTDataSet(data.Dataset):
                 continue
 
             self.ct_list.append(CTRecord(row))
-            self.class_count[self.ct_list[-1].label] += 1
+            if not 1 in self.ct_list[-1].label[:2]:
+                self.class_count[0] += 1
+            elif self.ct_list[-1].label[1]:
+                self.class_count[2] += 1
+            else:   
+                self.class_count[1] += 1
+
+            # # print error labeled cases:
+            # if self.ct_list[-1].label[1] and not sum(self.ct_list[-1].label[3:]):
+            #     print(self.ct_list[-1].path.rsplit('/', 1)[1])
 
     def _parse_case(self):
         row = self.list_file.strip().split(' - ')[-1].split(' ')
@@ -223,7 +219,7 @@ class CTDataSet(data.Dataset):
         else:
             _, images = self._load_images(record)
 
-        return self.spatial_transform(images), record.label
+        return self.spatial_transform(images), torch.Tensor(record.label)
 
 
     def __len__(self):

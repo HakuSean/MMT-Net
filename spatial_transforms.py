@@ -11,8 +11,55 @@ import numpy as np
 import torch
 import torchvision
 from PIL import Image, ImageOps
+import cv2
 
-import ipdb
+class GroupRandomBrightnessContrast(object):
+    """Randomly change brightness and contrast of the input image.
+    Args:
+        brightness_limit ((float, float) or float): factor range for changing brightness.
+            If limit is a single float, the range will be (-limit, limit). Default: (-0.2, 0.2).
+        contrast_limit ((float, float) or float): factor range for changing contrast.
+            If limit is a single float, the range will be (-limit, limit). Default: (-0.2, 0.2).
+        brightness_by_max (Boolean): If True adjust contrast by image dtype maximum,
+            else adjust contrast by image mean.
+        p (float): probability of applying the transform. Default: 0.5.
+    Targets:
+        image
+    Image types:
+        uint8, float32
+    """
+
+    def __init__(self, brightness_limit=0.2, contrast_limit=0.2, brightness_by_max=True, p=0.5):
+        self.brightness_limit = brightness_limit
+        self.contrast_limit = contrast_limit
+        self.prob = p
+
+    def __call__(self, img_group):
+        # sometimes do nothing
+        if random.random() > self.prob:
+            return img_group
+        else:
+            alpha = 1.0 + random.uniform(-self.contrast_limit, self.contrast_limit)
+            beta = 0.0 + random.uniform(-self.brightness_limit, self.brightness_limit)
+
+            dtype = np.dtype("uint8")
+            max_value = 255 # max value for uint8
+
+            lut = np.arange(0, max_value + 1).astype("float32")
+
+            if alpha != 1:
+                lut *= alpha
+            if beta != 0:
+                lut += beta * max_value
+
+            lut = np.clip(lut, 0, max_value).astype(dtype)
+
+            out_images = list()
+
+            for img in img_group:
+                out_images.append(Image.fromarray(cv2.LUT(np.array(img), lut)))
+
+            return out_images
 
 # different from RandomCrop: use the same random number for the group
 class GroupRandomCrop(object):
@@ -40,6 +87,79 @@ class GroupRandomCrop(object):
                 out_images.append(img.crop((x1, y1, x1 + tw, y1 + th)))
 
         return out_images
+
+# different from RandomCrop: Including random resize function
+class GroupRandomResizedCrop(object):
+    def __init__(self, size, scale=(0.08, 1.0), ratio=(3. / 4., 4. / 3.), interpolation=Image.BILINEAR):
+        if (scale[0] > scale[1]) or (ratio[0] > ratio[1]):
+            warnings.warn("range should be of kind (min, max)")
+
+        self.interpolation = interpolation
+        self.scale = scale
+        self.ratio = ratio
+        self.worker = torchvision.transforms.Resize((size, size))
+
+    def __call__(self, img_group):
+        """
+        Args:
+            img (PIL Image): Image to be cropped and resized.
+
+        Returns:
+            PIL Image: Randomly cropped and resized image.
+        """
+        out_images = list()
+
+        i, j, h, w = self.get_params(img_group[0], self.scale, self.ratio)
+        for img in img_group:
+            out_images.append(self.worker(img.crop((i, j, i + w, j + h))))
+
+        return out_images
+
+    @staticmethod
+    def get_params(img, scale, ratio):
+        """Get parameters for ``crop`` for a random sized crop.
+
+        Args:
+            img (PIL Image): Image to be cropped.
+            scale (tuple): range of size of the origin size cropped
+            ratio (tuple): range of aspect ratio of the origin aspect ratio cropped
+
+        Returns:
+            tuple: params (i, j, h, w) to be passed to ``crop`` for a random
+                sized crop.
+        """
+        width, height = img.size
+        area = height * width
+
+        for attempt in range(10):
+            target_area = random.uniform(*scale) * area
+            log_ratio = (math.log(ratio[0]), math.log(ratio[1]))
+            aspect_ratio = math.exp(random.uniform(*log_ratio))
+
+            w = int(round(math.sqrt(target_area * aspect_ratio)))
+            h = int(round(math.sqrt(target_area / aspect_ratio)))
+
+            if 0 < w <= width and 0 < h <= height:
+                i = random.randint(0, height - h)
+                j = random.randint(0, width - w)
+                return i, j, h, w
+
+        # Fallback to central crop
+        in_ratio = float(width) / float(height)
+        if (in_ratio < min(ratio)):
+            w = width
+            h = int(round(w / min(ratio)))
+        elif (in_ratio > max(ratio)):
+            h = height
+            w = int(round(h * max(ratio)))
+        else:  # whole image
+            w = width
+            h = height
+        i = (height - h) // 2
+        j = (width - w) // 2
+        return i, j, h, w
+
+
 
 class GroupFiveCrop(object):
     def __init__(self, size):
@@ -85,7 +205,7 @@ class GroupRandomRotation(object):
             will be (-degrees, +degrees).
     """
 
-    def __init__(self, degrees):
+    def __init__(self, degrees, p=0.5):
         if isinstance(degrees, numbers.Number):
             if degrees < 0:
                 raise ValueError("If degrees is a single number, it must be positive.")
@@ -93,7 +213,9 @@ class GroupRandomRotation(object):
         else:
             if len(degrees) != 2:
                 raise ValueError("If degrees is a sequence, it must be of len 2.")
-            self.degrees = degreesf
+            self.degrees = degrees
+
+        self.prob = p
 
     def __call__(self, img_group):
         """
@@ -101,10 +223,12 @@ class GroupRandomRotation(object):
         Returns:
             PIL Image: Rotated image.
         """
+        if random.random() > self.prob:
+            return img_group
+        else:
+            angle = random.uniform(self.degrees[0], self.degrees[1])
 
-        angle = random.uniform(self.degrees[0], self.degrees[1])
-
-        return [img.rotate(angle) for img in img_group]
+            return [img.rotate(angle) for img in img_group]
 
 # put images within one group into one numpy.ndarray
 class ToTorchTensor(object):
@@ -160,7 +284,7 @@ class ToTorchTensor(object):
             if self.model_type == '2d':
                 img = img.float().div(255.0)
             else:
-                img = img.float().sub(img.min()).div(img.max() - img.min())
+                img = img.float().sub(img.min()) #.div(img.max() - img.min())
         elif not self.norm == 1.0: # for jpg, norm = 255
             img = img.float().div(self.norm)
 
@@ -172,12 +296,10 @@ class ToTorchTensor(object):
     def imgs2tensor(self, imgs):
         '''Transfer image to torch tensor, i.e. ToTensor
         '''
-        if self.model_type == '2d':
-            img = np.concatenate([np.expand_dims(x, 0) for x in imgs], axis=0) # N x 512 x 512 x 3
-            img = torch.from_numpy(img).permute(0, 3, 1, 2).contiguous() # N x 3 x 512 x512
-        else:
-            img = np.concatenate([np.expand_dims(x, 2) for x in imgs], axis=2) # 512 x 512 x N(image numbers)
-            img = torch.from_numpy(img).permute(2, 0, 1).contiguous() # N x 512 x 512
+        img = np.concatenate([np.expand_dims(x, 0) for x in imgs], axis=0) # N x 512 x 512 x 3
+        img = torch.from_numpy(img).permute(0, 3, 1, 2).contiguous() # N x 3 x 512 x512
+            # img = np.concatenate([np.expand_dims(x, 2) for x in imgs], axis=2) # 512 x 512 x N(image numbers)
+            # img = torch.from_numpy(img).permute(2, 0, 1).contiguous() # N x 512 x 512
 
         return img
 

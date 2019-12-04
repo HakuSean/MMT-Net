@@ -15,7 +15,7 @@ def generate_tsn(args):
                 base_model=args.arch.replace('-', ''), 
                 channels=args.n_channels, 
                 fusion_type=args.fusion_type, dropout=args.dropout, 
-                pretrained=not args.pretrain_path == '',
+                pretrained=args.pretrain_path,
                 partial_bn=not args.no_partialbn,
                 attention_size=getattr(args, 'attention_size', 0),
                 use_se=getattr(args, 'use_se', False))
@@ -33,7 +33,7 @@ CTSN Configurations:
     dropout_ratio:      {}
         """.format(args.arch, args.n_slices, args.n_channels, model.input_size, args.dropout)))
     
-    model = nn.DataParallel(model).cuda()
+    model = model.cuda()
 
     return model, policies
 
@@ -50,9 +50,13 @@ class CTSN(nn.Module):
         self.reshape = not fusion_type == 'att'
         self.dropout = dropout
         self.pretrained = pretrained
-        self.use_se = use_se
         if not before_softmax and fusion_type != 'avg':
             raise ValueError("Only avg consensus can be used after Softmax")
+
+        if use_se:
+            base_model = 'se_' + base_model
+        if 'resnext' in base_model:
+            base_model = base_model + '_32x4d' 
 
         # prepare model
         self._prepare_base_model(base_model)
@@ -63,8 +67,8 @@ class CTSN(nn.Module):
 
         feature_dim = self._prepare_ctsn(num_class) # initialize the last layer
 
-        print("Converting the ImageNet model to a CTSN init model")
-        self.base_model = self._construct_ct_model(self.base_model)
+        # print("Converting the ImageNet model to a CTSN init model")
+        # self.base_model = self._construct_ct_model(self.base_model)
         print("Done. CTSN model ready...")
 
         # special operations
@@ -86,6 +90,8 @@ class CTSN(nn.Module):
             constant_(self.feat2att.bias, 0)
             normal_(self.alpha_net.weight, 0, std)
             constant_(self.alpha_net.bias, 0)
+
+        # model.avg_pool = nn.AdaptiveAvgPool2d(1)
 
         if self.dropout == 0:
             setattr(self.base_model, self.base_model.last_layer_name, nn.Linear(feature_dim, num_class))
@@ -114,13 +120,12 @@ class CTSN(nn.Module):
             self.input_mean = [0.5]
             self.input_std = [0.226]
 
-        elif base_model == 'BNInception':
+        elif 'resnext' in base_model or base_model == 'bninception':
             self.base_model = getattr(models_2d, base_model)(pretrained=self.pretrained)
             self.base_model.last_layer_name = 'last_linear'
-            self.input_size = 224
-            # self.input_mean = [104, 117, 128]
-            self.input_std = [1]
-            self.input_mean = [128]
+            self.input_size = getattr(self.base_model, 'input_size', [3, 224, 224])[-1]
+            self.input_mean = getattr(self.base_model, 'mean', [0.485, 0.456, 0.406])
+            self.input_std = getattr(self.base_model, 'std', [0.229, 0.224, 0.225])
 
         elif 'inception' in base_model:
             self.base_model = getattr(torchvision.models, base_model)(self.pretrained)
@@ -192,18 +197,32 @@ class CTSN(nn.Module):
                 if len(list(m.parameters())) > 0:
                     raise ValueError("New atomic module type: {}. Need to give it a learning policy".format(type(m)))
 
+
         return [
-            {'params': first_conv_weight, 'lr_mult': 5, 'decay_mult': 1,
+            {'params': first_conv_weight, 'lr_mult': 1, 'decay_mult': 1,
              'name': "first_conv_weight"},
-            {'params': first_conv_bias, 'lr_mult': 10, 'decay_mult': 0,
+            {'params': first_conv_bias, 'lr_mult': 1, 'decay_mult': 1,
              'name': "first_conv_bias"},
             {'params': normal_weight, 'lr_mult': 1, 'decay_mult': 1,
              'name': "normal_weight"},
-            {'params': normal_bias, 'lr_mult': 2, 'decay_mult': 0,
+            {'params': normal_bias, 'lr_mult': 1, 'decay_mult': 1,
              'name': "normal_bias"},
             {'params': bn, 'lr_mult': 1, 'decay_mult': 0,
              'name': "BN scale/shift"},
         ]
+
+        # return [
+        #     {'params': first_conv_weight, 'lr_mult': 5, 'decay_mult': 1,
+        #      'name': "first_conv_weight"},
+        #     {'params': first_conv_bias, 'lr_mult': 10, 'decay_mult': 0,
+        #      'name': "first_conv_bias"},
+        #     {'params': normal_weight, 'lr_mult': 1, 'decay_mult': 1,
+        #      'name': "normal_weight"},
+        #     {'params': normal_bias, 'lr_mult': 2, 'decay_mult': 0,
+        #      'name': "normal_bias"},
+        #     {'params': bn, 'lr_mult': 1, 'decay_mult': 0,
+        #      'name': "BN scale/shift"},
+        # ]
 
     def forward(self, input):
         # sample_len = 2 * self.new_length # here 2 means flow_x and flow_y, 3 for RGB

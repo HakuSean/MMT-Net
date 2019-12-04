@@ -499,10 +499,11 @@ def bninception(num_classes=1000, pretrained='imagenet'):
     """
     model = BNInception(num_classes=num_classes, pretrained=pretrained)
     if pretrained:
-        settings = pretrained_settings['bninception'][pretrained]
+        settings = pretrained_settings['bninception']['imagenet']
         assert num_classes == settings['num_classes'], \
             "num_classes should be {}, but is {}".format(settings['num_classes'], num_classes)
-        model.load_state_dict(model_zoo.load_url(settings['url']))
+        if not os.path.isfile(pretrained):
+            model.load_state_dict(model_zoo.load_url(settings['url']))
         model.input_space = settings['input_space']
         model.input_size = settings['input_size']
         model.input_range = settings['input_range']

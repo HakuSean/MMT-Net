@@ -5,6 +5,7 @@ https://github.com/pytorch/vision/blob/master/torchvision/models/resnet.py
 from __future__ import print_function, division, absolute_import
 from collections import OrderedDict
 import math
+import os
 
 import torch.nn as nn
 from torch.utils import model_zoo
@@ -366,11 +367,12 @@ class SENet(nn.Module):
         return x
 
 
-def initialize_pretrained_model(model, num_classes, settings):
+def initialize_pretrained_model(model, num_classes, settings, pretrained):
     assert num_classes == settings['num_classes'], \
         'num_classes should be {}, but is {}'.format(
             settings['num_classes'], num_classes)
-    model.load_state_dict(model_zoo.load_url(settings['url']))
+    if not os.path.isfile(pretrained):
+        model.load_state_dict(model_zoo.load_url(settings['url']))
     model.input_space = settings['input_space']
     model.input_size = settings['input_size']
     model.input_range = settings['input_range']
@@ -382,8 +384,8 @@ def senet154(num_classes=1000, pretrained='imagenet'):
     model = SENet(SEBottleneck, [3, 8, 36, 3], groups=64, reduction=16,
                   dropout_p=0.2, num_classes=num_classes)
     if pretrained:
-        settings = pretrained_settings['senet154'][pretrained]
-        initialize_pretrained_model(model, num_classes, settings)
+        settings = pretrained_settings['senet154']['imagenet']
+        initialize_pretrained_model(model, num_classes, settings, pretrained)
     return model
 
 
@@ -393,8 +395,8 @@ def se_resnet50(num_classes=1000, pretrained='imagenet'):
                   downsample_kernel_size=1, downsample_padding=0,
                   num_classes=num_classes)
     if pretrained:
-        settings = pretrained_settings['se_resnet50'][pretrained]
-        initialize_pretrained_model(model, num_classes, settings)
+        settings = pretrained_settings['se_resnet50']['imagenet']
+        initialize_pretrained_model(model, num_classes, settings, pretrained)
     return model
 
 
@@ -404,8 +406,8 @@ def se_resnet101(num_classes=1000, pretrained='imagenet'):
                   downsample_kernel_size=1, downsample_padding=0,
                   num_classes=num_classes)
     if pretrained:
-        settings = pretrained_settings['se_resnet101'][pretrained]
-        initialize_pretrained_model(model, num_classes, settings)
+        settings = pretrained_settings['se_resnet101']['imagenet']
+        initialize_pretrained_model(model, num_classes, settings, pretrained)
     return model
 
 
@@ -415,8 +417,8 @@ def se_resnet152(num_classes=1000, pretrained='imagenet'):
                   downsample_kernel_size=1, downsample_padding=0,
                   num_classes=num_classes)
     if pretrained:
-        settings = pretrained_settings['se_resnet152'][pretrained]
-        initialize_pretrained_model(model, num_classes, settings)
+        settings = pretrained_settings['se_resnet152']['imagenet']
+        initialize_pretrained_model(model, num_classes, settings, pretrained)
     return model
 
 
@@ -426,8 +428,8 @@ def se_resnext50_32x4d(num_classes=1000, pretrained='imagenet'):
                   downsample_kernel_size=1, downsample_padding=0,
                   num_classes=num_classes)
     if pretrained:
-        settings = pretrained_settings['se_resnext50_32x4d'][pretrained]
-        initialize_pretrained_model(model, num_classes, settings)
+        settings = pretrained_settings['se_resnext50_32x4d']['imagenet']
+        initialize_pretrained_model(model, num_classes, settings, pretrained)
     return model
 
 
@@ -437,6 +439,6 @@ def se_resnext101_32x4d(num_classes=1000, pretrained='imagenet'):
                   downsample_kernel_size=1, downsample_padding=0,
                   num_classes=num_classes)
     if pretrained:
-        settings = pretrained_settings['se_resnext101_32x4d'][pretrained]
-        initialize_pretrained_model(model, num_classes, settings)
+        settings = pretrained_settings['se_resnext101_32x4d']['imagenet']
+        initialize_pretrained_model(model, num_classes, settings, pretrained)
     return model

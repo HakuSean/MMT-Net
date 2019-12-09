@@ -37,11 +37,13 @@ def train_epoch(epoch, data_loader, model, criterion, optimizer, opt, logger):
 
         outputs = model(inputs)
 
-        loss = criterion(outputs, targets)
-        losses.update(loss.item(), inputs.size(0))
+        loss = criterion(outputs, targets)       
+        losses.update(loss.sum().item(), inputs.size(0))
 
-        optimizer.zero_grad()
-        loss.backward()
+        with amp.scale_loss(loss, optimizer) as scaled_loss:
+            scaled_loss.backward()
+
+        # loss.backward()
 
         # print logits for debugging
         neg = 0
@@ -55,9 +57,6 @@ def train_epoch(epoch, data_loader, model, criterion, optimizer, opt, logger):
                 print('\nnegative logits:', outputs[i].data.cpu(), targets[i].data.cpu(), criterion(outputs[i], targets[i]).cpu().item())
                 neg += 1
 
-        # with amp.scale_loss(loss, optimizer) as scaled_loss:
-        #     scaled_loss.backward()
-
         # from TSN: clip gradients
         if opt.clip_gradient is not None:
             total_norm = clip_grad_norm(model.parameters(), opt.clip_gradient)
@@ -65,6 +64,7 @@ def train_epoch(epoch, data_loader, model, criterion, optimizer, opt, logger):
                 print("clipping gradient: {} with coef {}".format(total_norm, opt.clip_gradient / total_norm))
 
         optimizer.step()
+        optimizer.zero_grad()
 
         batch_time.update(time.time() - end_time)
         end_time = time.time()

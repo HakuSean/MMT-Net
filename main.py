@@ -28,6 +28,10 @@ from spatial_transforms import *
 from temporal_transforms import *
 from utils import *
 
+import apex
+from apex import amp
+amp.register_float_function(torch, 'sigmoid')
+
 if __name__ == '__main__':
     # set this to avoid loading memory problems
     # torch.backends.cudnn.enabled = False 
@@ -130,20 +134,19 @@ if __name__ == '__main__':
         raise ValueError("Unknown input format type.")
 
     # prepare for crop
-    crop_size = getattr(model, 'input_size', args.sample_size)
     assert args.spatial_crop in ['random', 'five', 'center', 'resize']
     if args.spatial_crop == 'resize':
-        crop_method = GroupRandomResizedCrop(crop_size)
+        crop_method = GroupRandomResizedCrop(args.sample_size)
     elif args.spatial_crop == 'random':
-        crop_method = GroupRandomCrop(crop_size)
+        crop_method = GroupRandomCrop(args.sample_size)
     elif args.spatial_crop == 'five':
-        crop_method = GroupFiveCrop(crop_size)
+        crop_method = GroupFiveCrop(args.sample_size)
     elif args.spatial_crop == 'center':
-        crop_method = GroupCenterCrop(crop_size)
+        crop_method = GroupCenterCrop(args.sample_size)
 
     # define spatial and temporal transform
     spatial_transform = transforms.Compose([
-        GroupResize(args.sample_size if 'inception' in args.model and args.sample_size >= 300 else 512),
+        # GroupResize(args.sample_size if 'inception' in args.model and args.sample_size >= 300 else 512),
         crop_method,
         GroupRandomRotation(30, p=0.5),
         GroupRandomHorizontalFlip(),
@@ -165,9 +168,6 @@ if __name__ == '__main__':
     print('Transformation Definition time: {}'.format(time.time() - start))
 
     training_data = CTDataSet(train_list, args, spatial_transform, temporal_transform)
-
-    # import ipdb
-    # ipdb.set_trace()
 
     print('Dataset Definition time: {}'.format(time.time() - start))
 
@@ -231,6 +231,9 @@ if __name__ == '__main__':
             centered=args.nesterov)
     else:
         raise ValueError("Unknown optimizer type")
+
+    model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
+    model = nn.DataParallel(model)
 
     # -----------------------------------------
     # --- prepare dataset (validation) --------

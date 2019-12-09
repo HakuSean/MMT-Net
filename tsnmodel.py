@@ -24,6 +24,9 @@ def generate_tsn(args):
     #     print(('group: {} has {} params, lr_mult: {}, decay_mult: {}'.format(
     #         group['name'], len(group['params']), group['lr_mult'], group['decay_mult'])))
 
+    if not args.sample_size:
+        args.sample_size = model.input_size
+    
     print(("""
 Initializing CTSN with base model: {}.
 CTSN Configurations:
@@ -31,7 +34,7 @@ CTSN Configurations:
     channels:           {}
     crop_size:          {}
     dropout_ratio:      {}
-        """.format(args.arch, args.n_slices, args.n_channels, model.input_size, args.dropout)))
+        """.format(args.arch, args.n_slices, args.n_channels, args.sample_size, args.dropout)))
     
     model = model.cuda()
 
@@ -91,7 +94,7 @@ class CTSN(nn.Module):
             normal_(self.alpha_net.weight, 0, std)
             constant_(self.alpha_net.bias, 0)
 
-        # model.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.base_model.avg_pool = nn.AdaptiveAvgPool2d(1)
 
         if self.dropout == 0:
             setattr(self.base_model, self.base_model.last_layer_name, nn.Linear(feature_dim, num_class))

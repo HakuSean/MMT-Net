@@ -281,10 +281,9 @@ class ToTorchTensor(object):
         # step 3: form 0-255 or 0-1
         # if norm == 1, means do nothing for normalization
         if not self.norm: # for dicom, each case specifically
-            if self.model_type == '2d':
-                img = img.float().div(255.0)
-            else:
-                img = img.float().sub(img.min()) #.div(img.max() - img.min())
+            img = img.float().div(255.0)
+            # else:
+            #     img = img.float().sub(img.min()).div(img.max() - img.min())
         elif not self.norm == 1.0: # for jpg, norm = 255
             img = img.float().div(self.norm)
 

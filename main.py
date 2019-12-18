@@ -136,7 +136,7 @@ if __name__ == '__main__':
     # prepare for crop
     assert args.spatial_crop in ['random', 'five', 'center', 'resize']
     if args.spatial_crop == 'resize':
-        crop_method = GroupRandomResizedCrop(args.sample_size)
+        crop_method = GroupRandomResizedCrop(args.sample_size, scale=(0.7, 1.0))
     elif args.spatial_crop == 'random':
         crop_method = GroupRandomCrop(args.sample_size)
     elif args.spatial_crop == 'five':

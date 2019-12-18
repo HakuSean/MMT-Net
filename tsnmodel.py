@@ -75,7 +75,7 @@ class CTSN(nn.Module):
         print("Done. CTSN model ready...")
 
         # special operations
-        self.softmax = nn.Softmax(dim=1)
+        # self.softmax = nn.Softmax(dim=1)
 
         self._enable_pbn = partial_bn
         if partial_bn:
@@ -238,8 +238,8 @@ class CTSN(nn.Module):
         if self.dropout > 0:
             base_out = self.new_fc(base_out)
 
-        if not self.before_softmax:
-            base_out = self.softmax(base_out)
+        # if not self.before_softmax:
+        #     base_out = self.softmax(base_out)
 
         if self.reshape:
             base_out = base_out.view((-1, self.num_segments) + base_out.size()[1:])
@@ -254,19 +254,19 @@ class CTSN(nn.Module):
 
         return output.squeeze(1)
 
-    def attention_net(self, base_out):
-        att = self.feat2att(base_out) # batch*segments, attention_size
-        att = self.alpha_net(torch.tanh(att)).view(-1, self.num_segments) # batch, segments
+    # def attention_net(self, base_out):
+    #     att = self.feat2att(base_out) # batch*segments, attention_size
+    #     att = self.alpha_net(torch.tanh(att)).view(-1, self.num_segments) # batch, segments
 
-        alphas = self.softmax(att).unsqueeze(-1) # dim means which dim adds up to 1
+    #     alphas = self.softmax(att).unsqueeze(-1) # dim means which dim adds up to 1
 
-        state = base_out.view((-1, self.num_segments) + base_out.size()[1:])
-        #print(state.size()) = (batch_size, segments, feature_dim)
+    #     state = base_out.view((-1, self.num_segments) + base_out.size()[1:])
+    #     #print(state.size()) = (batch_size, segments, feature_dim)
 
-        attn_output = torch.sum(state * alphas, 1)
-        #print(attn_output.size()) = (batch_size, feature_dim)
+    #     attn_output = torch.sum(state * alphas, 1)
+    #     #print(attn_output.size()) = (batch_size, feature_dim)
 
-        return attn_output
+    #     return attn_output
 
 
     def _construct_ct_model(self, base_model):

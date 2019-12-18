@@ -124,21 +124,49 @@ def create_logger(log_path, name, runtime=True):
     clogger.addHandler(ch)
     return clogger
 
-# majority vote for cases with more that one scans
-def majority_vote(datalist, gt, pred):
+# vote for cases with more that one scans
+# Two mode: majority vote, average vote
+def case_vote(datalist, gt, score, thresh, majority=True):
     results = OrderedDict()
     gts = list()
     for idx, line in enumerate(open(datalist, 'r')):
         name = line.split(' ', 1)[0]
         if not name in results: 
-            results[name] = [pred[idx]]
+            results[name] = [score[idx]]
             gts.append(gt[idx])
         else:
-            results[name].append(pred[idx])
+            results[name].append(score[idx])
 
         idx += 1
 
-    return np.array(gts), np.array([Counter(i).most_common(1)[0][0] for i in results.values()])
+    case_gt = np.array(gts)
+
+    # majority vote: score uses the average of majority results
+    if majority:
+        case_pred = list()
+        case_score = list()
+        # using Counter to count the most common labels. 
+        # If 0 and 1 has the same count, use 1 (By default in Counter, it uses the smaller number)
+        for s in results.values():
+            pred = (np.array(s) > thresh).astype(np.int)
+            cnts = Counter(pred).most_common()
+            label = 1 if len(cnts) > 1 and cnts[0][1] == cnts[1][1] else cnts[0][0]
+
+            # append label and score
+            case_pred.append(label)
+            case_score.append(
+                ((pred ^ (1 - label)) * s).sum() / (pred ^ (1 - label)).sum()
+            )
+
+        case_pred = np.array(case_pred)
+        case_score = np.array(case_score)
+    # average vote: score uses the average of all scans, and the label is 1 when score > 0
+    else:
+        case_score = np.array([sum(i)/len(i) for i in results.values()])
+        case_pred = np.array([int(i > thresh) for i in case_score])
+
+    return case_gt, case_pred, case_score
+
 
 # ----------------------------------------------------------------
 # deserted -------------------------------------------------------

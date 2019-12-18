@@ -135,10 +135,11 @@ if __name__ == '__main__':
             crop_size = getattr(model.module, 'input_size', snap_opts.sample_size)
 
             spatial_transform = transforms.Compose([
-                GroupResize(snap_opts.sample_size if snap_opts.model_type == 'tsn' and snap_opts.sample_size >= 300 else 512),
-                GroupFiveCrop(crop_size),
-                ToTorchTensor(snap_opts.model_type, norm=norm_value, caffe_pretrain=snap_opts.arch == 'BNInception'),
-                norm_method
+                # GroupResize(snap_opts.sample_size if 'inception' in snap_opts.model and snap_opts.sample_size >= 300 else 512),
+                GroupResize(crop_size),
+                # GroupFiveCrop(crop_size)
+                ToTorchTensor(snap_opts.model_type, norm=norm_value, caffe_pretrain=snap_opts.arch == 'bninception'),
+                norm_method,
                 ])
         else:
             spatial_transform = transforms.Compose([
@@ -170,17 +171,7 @@ if __name__ == '__main__':
         # -----------------------------------
         # --- prepare criterion -------------
         # -----------------------------------
-        if snap_opts.loss_type == 'nll':
-            criterion = nn.BCEWithLogitsLoss()
-        elif snap_opts.loss_type == 'weighted':
-            weight_tensor = torch.tensor([0.5, 2, 0.5, 1, 1, 1, 1, 1], dtype=torch.float)
-            criterion = nn.BCEWithLogitsLoss(pos_weight=weight_tensor)
-            # criterion = BCEWithLogitsWeightedLoss(snap_opts.n_classes, class_weight=weight_tensor)
-        elif snap_opts.loss_type == 'focal':
-            weight_tensor = torch.tensor([1, 2, 1, 1, 1, 1, 1, 1], dtype=torch.float)
-            criterion = MultiLabelFocalLoss(snap_opts.n_classes, alpha=weight_tensor)
-        else:
-            raise ValueError("Unknown loss type")
+        criterion = nn.BCEWithLogitsLoss()
 
         if torch.cuda.is_available():
             criterion = criterion.cuda()
@@ -198,7 +189,6 @@ if __name__ == '__main__':
     # -----------------------------------
     # --- Post-process Score ------------
     # -----------------------------------
-
     # score_aggregation
     final_scores = np.zeros_like(scores)
     for s, w in zip(score_lists, score_weights):
@@ -208,13 +198,16 @@ if __name__ == '__main__':
 
     # calculate accuracy
     ground_truth = np.array([int(record.label[1]) for record in eval_data.ct_list])
-    pred_labels = np.array([int(i >= args.threshold) for i in final_scores[:, 1]])
+
     if not args.threshold == 0.5 * len(score_weights):
         eval_logger.info('Use >={} for label 1 (usually hemorrhage).'.format(args.threshold))
 
-    # max vote for cq500:
+    # max vote for cq500 (in total 490 cases):
     if 'cq500' in args.dataset:
-        ground_truth, pred_labels = majority_vote(args.dataset, ground_truth, pred_labels)
+        ground_truth, pred_labels, pred_scores = case_vote(args.dataset, ground_truth, final_scores[:, 1], args.threshold, majority=True)
+    else:
+        pred_scores = final_scores[:, 1]
+        pred_labels = np.array([int(i >= args.threshold) for i in final_scores[:, 1]])
 
     acc = (ground_truth == pred_labels).sum() / len(ground_truth)
     
@@ -226,7 +219,7 @@ if __name__ == '__main__':
     eval_logger.info('Final Sensitivity (tp/tp+fn):\t{:.3f}'.format(measures[1]))
     eval_logger.info('Final Specificity (tn/tn+fp):\t{:.3f}'.format(measures[3]))
     eval_logger.info('Final Accuracy (tn+tp/all):\t{:.03f}%'.format(acc * 100))
-    eval_logger.info("AUC Score (Test): %f" % roc_auc_score(ground_truth, final_scores[:, 1]))
+    eval_logger.info("AUC Score (Test): %f" % roc_auc_score(ground_truth, pred_scores))
 
     # -----------------------------------
     # --- Analysis Results --------------

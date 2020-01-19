@@ -11,7 +11,7 @@ import torch.nn as nn
 from torch.utils import model_zoo
 
 __all__ = ['SENet', 'senet154', 'se_resnet50', 'se_resnet101', 'se_resnet152',
-           'se_resnext50_32x4d', 'se_resnext101_32x4d']
+           'se_resnext50_32x4d', 'se_resnext101_32x4d', 'se_resnet18', 'se_resnext18_32x4d']
 
 pretrained_settings = {
     'senet154': {
@@ -103,6 +103,70 @@ class SEModule(nn.Module):
         x = self.fc2(x)
         x = self.sigmoid(x)
         return module_input * x
+
+
+class BasicBlock(nn.Module):
+    """
+    Base class for basic block that implements `forward()` method.
+    """
+    def forward(self, x):
+        identity = x
+
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+
+        if self.downsample is not None:
+            identity = self.downsample(x)
+
+        out = self.se_module(out) + identity
+        out = self.relu(out)
+
+        return out
+
+
+class SEBasicBlock(BasicBlock):
+
+    expansion = 1
+
+    def __init__(self, inplanes, planes, stride=1, downsample=None, groups=1,
+                 base_width=64, dilation=1, norm_layer=None):
+        super(SEBasicBlock, self).__init__()
+
+        # Both self.conv1 and self.downsample layers downsample the input when stride != 1
+        self.conv1 = nn.Conv2d(inplanes, planes, stride=stride, kernel_size=3)
+        self.bn1 = nn.BatchNorm2d(planes)
+        self.relu = nn.ReLU(inplace=True)
+        self.conv2 = nn.Conv2d(planes, planes, kernel_size=3)
+        self.bn2 = nn.BatchNorm2d(planes)
+        self.se_module = SEModule(planes, reduction=reduction)
+        self.downsample = downsample
+        self.stride = stride
+
+
+class SEResNeXtBasicBlock(BasicBlock):
+    """
+    ResNeXt BasicBlock type C with a Squeeze-and-Excitation module.
+    """
+    expansion = 1
+
+    def __init__(self, inplanes, planes, groups, reduction, stride=1,
+                 downsample=None, base_width=4):
+        super(SEResNeXtBottleneck, self).__init__()
+        width = math.floor(planes * (base_width / 64)) * groups
+        self.conv1 = nn.Conv2d(inplanes, width, kernel_size=1, bias=False,
+                               stride=1)
+        self.bn1 = nn.BatchNorm2d(width)
+        self.conv2 = nn.Conv2d(width, width, kernel_size=3, stride=stride,
+                               padding=1, groups=groups, bias=False)
+        self.bn2 = nn.BatchNorm2d(width)
+        self.relu = nn.ReLU(inplace=True)
+        self.se_module = SEModule(planes, reduction=reduction)
+        self.downsample = downsample
+        self.stride = stride
 
 
 class Bottleneck(nn.Module):
@@ -441,4 +505,20 @@ def se_resnext101_32x4d(num_classes=1000, pretrained='imagenet'):
     if pretrained:
         settings = pretrained_settings['se_resnext101_32x4d']['imagenet']
         initialize_pretrained_model(model, num_classes, settings, pretrained)
+    return model
+
+
+def se_resnet18(num_classes=1000, pretrained='imagenet'):
+    model = SENet(SEResNetBottleneck, [2, 2, 2, 2], groups=1, reduction=16,
+                  dropout_p=None, inplanes=64, input_3x3=False,
+                  downsample_kernel_size=1, downsample_padding=0,
+                  num_classes=num_classes)
+    return model
+
+
+def se_resnext18_32x4d(num_classes=1000, pretrained='imagenet'):
+    model = SENet(SEResNeXtBottleneck, [2, 2, 2, 2], groups=32, reduction=16,
+                  dropout_p=None, inplanes=64, input_3x3=False,
+                  downsample_kernel_size=1, downsample_padding=0,
+                  num_classes=num_classes)
     return model

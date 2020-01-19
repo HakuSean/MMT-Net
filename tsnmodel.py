@@ -75,7 +75,7 @@ class CTSN(nn.Module):
         print("Done. CTSN model ready...")
 
         # special operations
-        # self.softmax = nn.Softmax(dim=1)
+        self.softmax = nn.Softmax(dim=1)
 
         self._enable_pbn = partial_bn
         if partial_bn:
@@ -127,8 +127,8 @@ class CTSN(nn.Module):
             self.base_model = getattr(models_2d, base_model)(pretrained=self.pretrained)
             self.base_model.last_layer_name = 'last_linear'
             self.input_size = getattr(self.base_model, 'input_size', [3, 224, 224])[-1]
-            self.input_mean = getattr(self.base_model, 'mean', [0.485, 0.456, 0.406])
-            self.input_std = getattr(self.base_model, 'std', [0.229, 0.224, 0.225])
+            self.input_mean = getattr(self.base_model, 'mean', [0, 0, 0])
+            self.input_std = getattr(self.base_model, 'std', [1, 1, 1])
 
         elif 'inception' in base_model:
             self.base_model = getattr(torchvision.models, base_model)(self.pretrained)

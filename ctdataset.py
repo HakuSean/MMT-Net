@@ -26,16 +26,28 @@ class CTRecord(object):
 
     @property
     def label(self):
+        # consider for test cases, with no label input
         if len(self._data) == 1:
             return None
 
-        out = [0.] * self.num
         tags = self._data[-1].split(',')
-        for i in tags:
-            if i == '0':
-                return out
 
-            out[int(i) - 1] = 1.
+        # consider single-label classification, num_class is small
+        if self.num < 5: # non-hemo(0) vs hemo(1) vs bad_images (2)
+            if '3' in tags:
+                out = 2 # bad img
+            elif '2' in tags:
+                out = 1 # hemo
+            else:
+                out = 0 # others
+        # consider multi-label classification
+        else:
+            out = [0.] * self.num
+            for i in tags:
+                if i == '0':
+                    return out
+
+                out[int(i) - 1] = 1.
         return out
 
     @property
@@ -64,6 +76,7 @@ class CTDataSet(data.Dataset):
         self.registration = opts.registration
         self.modality = opts.modality
         self.model_type = opts.model_type # used for the different preprocessing methods for 2D model
+        self.dtype = torch.long if opts.loss_type == 'ce' else torch.float32
 
         if os.path.isfile(list_file):
             self._parse_list()
@@ -194,13 +207,16 @@ class CTDataSet(data.Dataset):
                 print(row[0], 'does not exist...')
                 continue
 
-            self.ct_list.append(CTRecord(row))
-            if not 1 in self.ct_list[-1].label[:2]:
-                self.class_count[0] += 1
-            elif self.ct_list[-1].label[1]:
-                self.class_count[2] += 1
-            else:   
-                self.class_count[1] += 1
+            self.ct_list.append(CTRecord(row, self.num_classes))
+            if self.dtype == torch.long: # i.e. cross entropy
+                self.class_count[self.ct_list[-1].label] += 1
+            else: # i.e. binary cross entropy with loss
+                if not 1 in self.ct_list[-1].label[:2]:
+                    self.class_count[0] += 1
+                elif self.ct_list[-1].label[1]:
+                    self.class_count[2] += 1
+                else:   
+                    self.class_count[1] += 1
 
             # # print error labeled cases:
             # if self.ct_list[-1].label[1] and not sum(self.ct_list[-1].label[3:]):
@@ -219,7 +235,7 @@ class CTDataSet(data.Dataset):
         else:
             _, images = self._load_images(record)
 
-        return self.spatial_transform(images), torch.Tensor(record.label)
+        return self.spatial_transform(images), torch.tensor(record.label, dtype=self.dtype)
 
 
     def __len__(self):

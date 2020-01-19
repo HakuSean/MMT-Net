@@ -38,9 +38,9 @@ def train_epoch(epoch, data_loader, model, criterion, optimizer, opt, logger):
         outputs = model(inputs)
 
         loss = criterion(outputs, targets)       
-        losses.update(loss.sum().item(), inputs.size(0))
+        losses.update(loss.mean().item(), inputs.size(0))
 
-        with amp.scale_loss(loss, optimizer) as scaled_loss:
+        with amp.scale_loss(loss.mean(), optimizer) as scaled_loss:
             scaled_loss.backward()
 
         # loss.backward()
@@ -49,12 +49,12 @@ def train_epoch(epoch, data_loader, model, criterion, optimizer, opt, logger):
         neg = 0
         pos = 0
         for i in range(len(targets)):
-            if targets[i].cpu().numpy()[1]:
+            if (not targets[i].shape and targets[i]==1) or (targets[i].shape and targets[i].cpu().numpy()[1]):
                 if pos < 2:
-                    print('positive logits:', outputs[i].data.cpu(), targets[i].data.cpu(), criterion(outputs[i], targets[i]).cpu().item())
+                    print('positive logits:', outputs[i].data.cpu(), targets[i].data.cpu(), loss[i].mean().item())
                     pos += 1
             elif neg < 2:
-                print('\nnegative logits:', outputs[i].data.cpu(), targets[i].data.cpu(), criterion(outputs[i], targets[i]).cpu().item())
+                print('\nnegative logits:', outputs[i].data.cpu(), targets[i].data.cpu(), loss[i].mean().item())
                 neg += 1
 
         # from TSN: clip gradients
@@ -106,7 +106,7 @@ def val_epoch(epoch, data_loader, model, criterion, opt, logger):
             all_targets.extend(targets.cpu().numpy())
 
             loss = criterion(outputs, targets)
-            losses.update(loss.item(), inputs.size(0))
+            losses.update(loss.mean().item(), inputs.size(0))
 
             batch_time.update(time.time() - end_time)
             end_time = time.time()
@@ -120,12 +120,19 @@ def val_epoch(epoch, data_loader, model, criterion, opt, logger):
                        batch_time=batch_time, data_time=data_time,
                        loss=losses)))
 
-    mAP = average_precision_score(np.array(all_targets), np.array(all_outputs))
-    hemo_ap = average_precision_score(np.array(all_targets)[:, 1], np.array(all_outputs)[:, 1])
-    logger.info(('Testing Results: mAP {0:.4f} ap for hemorrhage {1:.4f} Loss {loss.avg:.5f}'
-          .format(mAP, hemo_ap, loss=losses)))
+    if not targets[0].shape:
+        acc = calculate_accuracy(torch.tensor(all_outputs), torch.tensor(all_targets))
+        logger.info(('Testing Results: Acc {acc:.3f} Loss {loss.avg:.5f}'
+              .format(acc=acc, loss=losses)))
+        return losses.avg, acc
+    
+    else:
+        mAP = average_precision_score(np.array(all_targets), np.array(all_outputs))
+        hemo_ap = average_precision_score(np.array(all_targets)[:, 1], np.array(all_outputs)[:, 1])
+        logger.info(('Testing Results: mAP {0:.4f} ap for hemorrhage {1:.4f} Loss {loss.avg:.5f}'
+            .format(mAP, hemo_ap, loss=losses)))
 
-    return losses.avg, mAP
+        return losses.avg, mAP
 
 
 def evaluate_model(data_loader, model, criterion, opt, logger, concern_label=1):

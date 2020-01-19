@@ -111,7 +111,7 @@ def parse_opts():
     # ---------------------------------------------
     # -- Training Setting -------------------------
     # ---------------------------------------------
-    parser.add_argument('--loss_type', type=str, default='nll', choices=['nll', 'focal', 'weighted'],
+    parser.add_argument('--loss_type', type=str, default='nll', choices=['nll', 'focal', 'weighted', 'ce'],
                         help='Loss function used for training.')
     parser.add_argument('--learning_rate','--lr', type=float, default=0.01,
                         help= 'Initial learning rate (divided by 10 while training by lr scheduler)')

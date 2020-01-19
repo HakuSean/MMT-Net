@@ -95,7 +95,7 @@ if __name__ == '__main__':
     # --- prepare loss function ---------
     # -----------------------------------
     if args.loss_type == 'nll':
-        criterion = nn.BCEWithLogitsLoss()
+        criterion = nn.BCEWithLogitsLoss(reduction='none')
     elif args.loss_type == 'weighted':
         weight_tensor = torch.tensor([0.5, 2, 0.5, 1, 1, 1, 1, 1], dtype=torch.float)
         criterion = nn.BCEWithLogitsLoss(pos_weight=weight_tensor)
@@ -103,6 +103,8 @@ if __name__ == '__main__':
     elif args.loss_type == 'focal':
         weight_tensor = torch.tensor([1, 2, 1, 1, 1, 1, 1, 1], dtype=torch.float)
         criterion = MultiLabelFocalLoss(args.n_classes, alpha=weight_tensor)
+    elif args.loss_type == 'ce':
+        criterion = nn.CrossEntropyLoss(reduction='none')
     else:
         raise ValueError("Unknown loss type")
 

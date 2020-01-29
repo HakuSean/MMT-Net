@@ -192,33 +192,47 @@ if __name__ == '__main__':
     HEMO, POST = 1, 2
     final_scores = np.zeros_like(scores)
 
-    for s, w in zip(score_lists, score_weights):
-        final_scores += w / (1 + np.exp(-s)) # should use softmax, so the score values in different models should be comparable
+    if args.fusion_type == 'avg':
+        for s, w in zip(score_lists, score_weights):
+            final_scores += w / (1 + np.exp(-s)) # should use softmax, so the score values in different models should be comparable
+        args.threshold = args.threshold * len(score_weights)
+    elif args.fusion_type == 'max':
+        for score_id, score_value in enumerate(zip(*score_lists)):
+            final_scores[score_id] = 1/ (1+ np.exp(-np.array(score_value).max(axis=0)))
 
-    args.threshold = args.threshold * len(score_weights)
+    # specific for rsna and imed
+    if not args.subset:
+        index = list(range(len(eval_data)))
+    elif args.subset == 'rsna':
+        index = [i for i in range(len(eval_data)) if 'ID_' in eval_data.ct_list[i].path]
+    elif args.subset == 'imed':
+        index = [i for i in range(len(eval_data)) if 'ct_soft' in eval_data.ct_list[i].path]
 
     # calculate accuracy
     if args.no_postop:
-        ground_truth = np.array([int(record.label[HEMO]) for record in eval_data.ct_list])
+        ground_truth = np.array([int(record.label[HEMO]) for record in eval_data.ct_list])[index]
     else:
-        ground_truth = np.array([int(record.label[HEMO] and not record.label[POST]) for record in eval_data.ct_list])
+        ground_truth = np.array([int(record.label[HEMO] and not record.label[POST]) for record in eval_data.ct_list])[index]
 
     eval_logger.info('Use >={} for label 1 (usually hemorrhage).'.format(args.threshold))
 
     # max vote for cq500 (in total 490 cases):
     if 'cq500' in args.dataset:
-        ground_truth, pred_labels, pred_scores = case_vote(args.dataset, ground_truth, final_scores[:, HEMO], args.threshold, majority=True)
+        ground_truth, pred_labels, pred_scores = case_vote(args.dataset, ground_truth, final_scores[index, HEMO], args.threshold, majority=True)
     else:
         if args.no_postop:
-            pred_scores = final_scores[:, HEMO]
+            pred_scores = final_scores[index, HEMO]
             pred_labels = np.array([int(i[HEMO] >= args.threshold) for i in final_scores])
         else:
-            pred_scores = final_scores[:, HEMO] - final_scores[:, POST]
+            pred_scores = final_scores[index, HEMO] - final_scores[index, POST]
             pred_labels = np.array([int(i[HEMO] >= args.threshold and i[HEMO] - i[POST] >= 0.2) for i in final_scores])
 
     acc = (ground_truth == pred_labels).sum() / len(ground_truth)
     
     measures = f1_score(pred_labels, ground_truth, compute=args.concern_label)
+
+    if args.subset:
+        eval_logger.info('Result for dataset {}'.format(args.subset))
 
     eval_logger.info('Final Precision (tp/tp+fp):\t{:.3f}'.format(measures[0]))
     eval_logger.info('Final Recall (tp/tp+fn):\t{:.3f}'.format(measures[1]))

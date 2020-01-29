@@ -159,6 +159,8 @@ def parse_opts():
                         help='Fusion method for prediction scores in different frames/clips.')
     parser.add_argument('--threshold', '--th', type=float, default=0.5,
                         help='Threshold used for accuracy. Only used in Test.')
+    parser.add_argument('--subset', type=str, default=None, choices=['imed', 'rsna'],
+                        help='Select to print out results for specific subset. (Default: both)')
 
     args = parser.parse_args()
 

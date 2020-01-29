@@ -6,15 +6,12 @@ python3 evaluate.py ct40k_0514_bin_hemorrhage --model_depth 18 --n_test_samples 
 import os
 import sys
 import numpy as np
-import ipdb
 import time
-import pandas as pd
-
-from sklearn.metrics import confusion_matrix, roc_auc_score
 
 import torch
 from torch import nn
 from torchvision import transforms
+from sklearn.metrics import confusion_matrix, roc_auc_score
 
 from utils import *
 from ctdataset import CTDataSet
@@ -105,6 +102,7 @@ if __name__ == '__main__':
         snap_opts.input_format = args.input_format
         snap_opts.modality = getattr(args, 'modality', 'soft')
         snap_opts.arch = arch = checkpoint.get('arch', args.model)
+        snap_opts.no_postop = getattr(snap_opts, 'no_postop', args.no_postop)
 
         # load model
         if snap_opts.model_type == '3d':
@@ -190,29 +188,37 @@ if __name__ == '__main__':
     # --- Post-process Score ------------
     # -----------------------------------
     # score_aggregation
+    HEMO, POST = 1, 2
     final_scores = np.zeros_like(scores)
+
     for s, w in zip(score_lists, score_weights):
         final_scores += w / (1 + np.exp(-s)) # should use softmax, so the score values in different models should be comparable
 
     args.threshold = args.threshold * len(score_weights)
 
     # calculate accuracy
-    ground_truth = np.array([int(record.label[1]) for record in eval_data.ct_list])
+    if args.no_postop:
+        ground_truth = np.array([int(record.label[HEMO]) for record in eval_data.ct_list])
+    else:
+        ground_truth = np.array([int(record.label[HEMO] and not record.label[POST]) for record in eval_data.ct_list])
 
-    if not args.threshold == 0.5 * len(score_weights):
-        eval_logger.info('Use >={} for label 1 (usually hemorrhage).'.format(args.threshold))
+    eval_logger.info('Use >={} for label 1 (usually hemorrhage).'.format(args.threshold))
 
     # max vote for cq500 (in total 490 cases):
     if 'cq500' in args.dataset:
-        ground_truth, pred_labels, pred_scores = case_vote(args.dataset, ground_truth, final_scores[:, 1], args.threshold, majority=True)
+        ground_truth, pred_labels, pred_scores = case_vote(args.dataset, ground_truth, final_scores[:, HEMO], args.threshold, majority=True)
     else:
-        pred_scores = final_scores[:, 1]
-        pred_labels = np.array([int(i >= args.threshold) for i in final_scores[:, 1]])
+        if args.no_postop:
+            pred_scores = final_scores[:, HEMO]
+            pred_labels = np.array([int(i[HEMO] >= args.threshold) for i in final_scores])
+        else:
+            pred_scores = final_scores[:, HEMO] - final_scores[:, POST]
+            pred_labels = np.array([int(i[HEMO] >= args.threshold and i[HEMO] - i[POST] >= 0.2) for i in final_scores])
 
     acc = (ground_truth == pred_labels).sum() / len(ground_truth)
     
     measures = f1_score(pred_labels, ground_truth, compute=args.concern_label)
-        
+
     eval_logger.info('Final Precision (tp/tp+fp):\t{:.3f}'.format(measures[0]))
     eval_logger.info('Final Recall (tp/tp+fn):\t{:.3f}'.format(measures[1]))
     eval_logger.info('Final F1-measure (2pr/p+r):\t{:.3f}'.format(measures[2]))
@@ -227,17 +233,17 @@ if __name__ == '__main__':
 
     # prepare false_alarm and missed cases
     if args.analysis:
-        false_alarm = ['line\tid\t\tscores']
-        missed = ['line\tid\t\tscores']
+        false_alarm = ['line\tid\t\tscores (hemo, postop)']
+        missed = ['line\tid\t\tscores (hemo, postop)']
 
         for i in range(len(ground_truth)):
-            if not ground_truth[i] and pred_labels[i]: # 1 = hemo, 0 = non
+            if not ground_truth[i] and pred_labels[i]:
                 false_alarm.append('{}\t{}\t[{:.4f} {:.4f}]'.format(
-                    i+1, eval_data.ct_list[i].path.split('/')[-1], final_scores[i][0], final_scores[i][1]))
+                    i+1, eval_data.ct_list[i].path.split('/')[-1], final_scores[i][HEMO], final_scores[i][POST]))
 
             if ground_truth[i] and not pred_labels[i]:
                 missed.append('{}\t{}\t[{:.4f} {:.4f}]'.format(
-                    i+1, eval_data.ct_list[i].path.split('/')[-1], final_scores[i][0], final_scores[i][1]))
+                    i+1, eval_data.ct_list[i].path.split('/')[-1], final_scores[i][HEMO], final_scores[i][POST]))
 
         # print
         eval_logger.info('\nFalse alarms: ')

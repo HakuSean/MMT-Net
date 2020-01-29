@@ -45,9 +45,15 @@ class CTRecord(object):
             out = [0.] * self.num
             for i in tags:
                 if i == '0':
+                    # consider multi-label classification with non-hemo + normal together
+                    # out[0] = 1.
                     return out
 
-                out[int(i) - 1] = 1.
+                # consider multi-label classification without postop/normal
+                if self.num == 7 and int(i) > 2:
+                    out[int(i) - 2] = 1.
+                else:    
+                    out[int(i) - 1] = 1.
         return out
 
     @property
@@ -77,6 +83,7 @@ class CTDataSet(data.Dataset):
         self.modality = opts.modality
         self.model_type = opts.model_type # used for the different preprocessing methods for 2D model
         self.dtype = torch.long if opts.loss_type == 'ce' else torch.float32
+        self.no_postop = opts.no_postop
 
         if os.path.isfile(list_file):
             self._parse_list()
@@ -137,12 +144,12 @@ class CTDataSet(data.Dataset):
             # select dicom slices from original folder
             indices = self.temporal_transform(record)
 
-            for idx in indices:
-                reader.SetFileNames(dicom_names[idx:idx + self.sample_thickness])
+            for slice_idx in indices:
+                reader.SetFileNames(dicom_names[slice_idx:slice_idx + self.sample_thickness])
                 try:
                     imgs = sitk.GetArrayFromImage(reader.Execute())
                 except RuntimeError:
-                    print('Slice {} is beyond length of {}.'.format(directory, idx))
+                    print('Slice {} is beyond length of {}.'.format(directory, slice_idx))
                     break
                 
                 _, h, w = imgs.shape
@@ -150,11 +157,11 @@ class CTDataSet(data.Dataset):
                 output = np.zeros((h, w, 3)) 
 
                 for frame in imgs:                    
-                    for idx, win in enumerate(windows):
+                    for win_idx, win in enumerate(windows):
                         yMin = int(win[0] - 0.5 * win[1])
                         yMax = int(win[0] + 0.5 * win[1])
                         sub_img = np.clip(frame, yMin, yMax)
-                        output[:, :, idx] += (sub_img - yMin) / (yMax - yMin) * 255
+                        output[:, :, win_idx] += (sub_img - yMin) / (yMax - yMin) * 255
 
                 samples.append(Image.fromarray((output/self.sample_thickness).astype(np.uint8)))
 
@@ -200,6 +207,11 @@ class CTDataSet(data.Dataset):
 
         # start make row
         for x in open(self.list_file):
+            # ignore post-operative cases for args.no_postop
+            if self.no_postop:
+                if ',3' in x or '3,' in x or '3\n' in x:
+                    continue
+
             row = x.strip().split(' - ')[-1].rsplit(' ', max_split) # deal with logs
 
             # skip cases that does not exist

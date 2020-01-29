@@ -138,6 +138,8 @@ def parse_opts():
                         help='gradient norm clipping (default: disabled)')
     parser.add_argument('--no_partialbn', '--pb', default=False, action="store_true",
                         help='Whether to use partialbn for training (default: yes)')
+    parser.add_argument('--no_postop', action='store_true', default=False,
+                        help='Do not include postop cases in training/prediction.')
 
     # ---------------------------------------------
     # -- Val and Test -----------------------------
@@ -158,8 +160,13 @@ def parse_opts():
     parser.add_argument('--threshold', '--th', type=float, default=0.5,
                         help='Threshold used for accuracy. Only used in Test.')
 
-
-
     args = parser.parse_args()
+
+    # no_postop = args.n_classes == 7 and vice versa
+    if args.no_postop and args.n_classes >= 7:
+        args.n_classes = 7
+
+    if args.n_classes and not args.no_postop:
+        args.no_postop = True
 
     return args

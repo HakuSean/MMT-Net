@@ -116,14 +116,18 @@ if __name__ == '__main__':
     # ------------------------------------------
     # --- prepare transformation (train) -------
     # ------------------------------------------
-
-    # prepare normalization method
-    if args.no_mean_norm and not args.std_norm:
-        norm_method = GroupNormalize([0.], [1.])
-    elif not args.std_norm:
-        norm_method = GroupNormalize(model.input_mean, [1.]) # by default
+    if not args.pretrain_path or args.pretrain_path == 'None' or args.pretrain_path == 'False':
+        norm_method = GroupNormalize([0.] * args.n_channels, [1.] * args.n_channels)
+        model.input_mean = [0.] * args.n_channels
+        model.input_std = [1.] * args.n_channels
     else:
-        norm_method = GroupNormalize(model.input_mean, model.input_std) # the model is already wrapped by DataParalell
+        # prepare normalization method
+        if args.no_mean_norm and not args.std_norm:
+            norm_method = GroupNormalize([0.], [1.])
+        elif not args.std_norm:
+            norm_method = GroupNormalize(model.input_mean, [1.]) # by default
+        else:
+            norm_method = GroupNormalize(model.input_mean, model.input_std) # the model is already wrapped by DataParalell
 
     # prepare for value range
     if args.input_format == 'jpg':

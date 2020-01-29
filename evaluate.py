@@ -103,6 +103,7 @@ if __name__ == '__main__':
         snap_opts.modality = getattr(args, 'modality', 'soft')
         snap_opts.arch = arch = checkpoint.get('arch', args.model)
         snap_opts.no_postop = getattr(snap_opts, 'no_postop', args.no_postop)
+        snap_opts.pretrain_path = False # do not have to use pretrained in evaluation/test
 
         # load model
         if snap_opts.model_type == '3d':

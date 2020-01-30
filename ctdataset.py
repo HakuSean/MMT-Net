@@ -247,7 +247,7 @@ class CTDataSet(data.Dataset):
         else:
             _, images = self._load_images(record)
 
-        return self.spatial_transform(images), torch.tensor(record.label, dtype=self.dtype)
+        return self.spatial_transform(images), torch.tensor(record.label, dtype=self.dtype), record.path.rsplit('/', 1)[-1]
 
 
     def __len__(self):

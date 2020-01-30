@@ -305,21 +305,25 @@ class ToTorchTensor(object):
 
 # add channel-wise duplication in original Normalize
 class GroupNormalize(object):
-    def __init__(self, mean, std):
+    def __init__(self, mean, std, cuda=False):
         self.mean = torch.Tensor(mean) 
         self.std = torch.Tensor(std) 
         if len(mean) > 1:
             self.mean = self.mean.view(-1, 1, 1)
             self.std = self.std.view(-1, 1, 1)
+        if cuda:
+            self.mean = self.mean.cuda()
+            self.std = self.std.cuda()
 
     def __call__(self, tensor):
         # tensor.size()[0] is the real channel, len(self.mean) is the channel of one single picture.
         # For TSN, the division is the total slice number. For 3D, the division should always be one.
 
-        for t in tensor:
-            t.sub_(self.mean).div_(self.std)
+        new_tensor = torch.zeros_like(tensor)
+        for i in range(len(tensor)):
+            new_tensor[i] += tensor[i].sub(self.mean).div(self.std)
 
-        return tensor
+        return new_tensor
 
 # different from Resize: flip for the whole group according to probability
 class GroupResize(object):

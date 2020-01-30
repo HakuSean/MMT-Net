@@ -6,15 +6,12 @@ python3 evaluate.py ct40k_0514_bin_hemorrhage --model_depth 18 --n_test_samples 
 import os
 import sys
 import numpy as np
-import ipdb
 import time
-import pandas as pd
-
-from sklearn.metrics import confusion_matrix, roc_auc_score
 
 import torch
 from torch import nn
 from torchvision import transforms
+from sklearn.metrics import confusion_matrix, roc_auc_score
 
 from utils import *
 from ctdataset import CTDataSet
@@ -108,6 +105,8 @@ if __name__ == '__main__':
         snap_opts.input_format = args.input_format
         snap_opts.modality = getattr(args, 'modality', 'soft')
         snap_opts.arch = arch = checkpoint.get('arch', args.model)
+        snap_opts.no_postop = getattr(snap_opts, 'no_postop', args.no_postop)
+        snap_opts.pretrain_path = False # do not have to use pretrained in evaluation/test
 
         # load model
         if snap_opts.model_type == '3d':
@@ -120,15 +119,16 @@ if __name__ == '__main__':
         # load model states
         model = nn.DataParallel(model)
         model.load_state_dict(checkpoint['state_dict'])
+        model.eval()
 
         # -----------------------------------
         # --- Prepare data ------------------
         # -----------------------------------
+        norm_method = GroupNormalize(model.module.input_mean, model.module.input_std, cuda=torch.cuda.is_available())
 
         spatial_transform = transforms.Compose([
             GroupResize(snap_opts.sample_size),
             ToTorchTensor(snap_opts.model_type, norm=norm_value, caffe_pretrain=snap_opts.arch == 'bninception'),
-            GroupNormalize(model.module.input_mean, model.module.input_std)
             ])
 
         temporal_transform = TemporalSegmentCrop(snap_opts.n_slices, snap_opts.sample_thickness, test=True)
@@ -163,8 +163,9 @@ if __name__ == '__main__':
         # -----------------------------------
         # --- Prepare CAM image -------------
         # -----------------------------------
-        target_layer_names = ['layer4']
-        if not getattr(model, 'module', None):
+
+        target_layer_names = ['layer4'] # layer of CAM for resnet (including resnext)
+        if not getattr(model, 'module', None): # consider with/without dataparallel
             extractor = ModelOutputs(model, target_layer_names)
         else:
             extractor = ModelOutputs(model.module, target_layer_names)
@@ -173,36 +174,25 @@ if __name__ == '__main__':
         # corresponding label: hemorrhage = {0, 1, 2, 3 for normal, non, any, and exclude. The rest five are IPH, IVH, SAH, SDH and EDH.
 
         cnt = 0
-        for i, (inputs, targets) in enumerate(eval_loader): # each time only read one instance
+        for i, (inputs, targets, paths) in enumerate(eval_loader): # each time only read one instance
+            if args.analysis:
+                if cnt == 10:
+                    break
+                else:
+                    cnt += 1
+
             if torch.cuda.is_available():
-                inputs = inputs.cuda()
+                inputs = inputs.squeeze().cuda()
                 targets = targets[0].unsqueeze(0).cuda()
 
-            gt = int(targets[0][5].item())
+            # extract masks and scores
+            # masks: list of masks, len(masks)=30, masks[0].shape = (224, 224)
+            # scores: a tensor of (1, 8) or (1, 7), depend on no_postop
+            masks, score = grad_cam(model, target_layer_names, extractor, norm_method(inputs), index=args.concern_label)
 
-            if gt and not int(targets[0][3].item()):
-                outputs = model(inputs.squeeze())
-            else:
-                continue
-
-            pred = 1 if outputs[0][1].item() > 0 else 0
-
-            if pred and gt and not int(targets[0][2].item()):
-                cnt += 1
-                if cnt > 10:
-                    break
-
-                masks = grad_cam(model, target_layer_names, extractor, inputs.squeeze())
-                # printout:
-                record = eval_data.ct_list[i]
-                indices = eval_data.temporal_transform(record)
-                reader = sitk.ImageSeriesReader()
-                dicom_names = reader.GetGDCMSeriesFileNames(next(os.walk(record.path, topdown=False))[0])
-                reader.SetFileNames(dicom_names)
-                imgs = sitk.GetArrayFromImage(reader.Execute())
-
-                show_cam_on_image(imgs, masks, os.path.join(outpath, record.path.rsplit('/', 1)[-1]))
-        
+            # prepare image for printout:
+            show_cam_on_image(inputs.permute((0, 2, 3, 1)).cpu().numpy(), masks, os.path.join(outpath, paths[0]))
+    
 '''
 
         scores = evaluate_model(eval_loader, model, criterion, snap_opts, eval_logger, concern_label=args.concern_label)

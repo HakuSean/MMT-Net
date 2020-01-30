@@ -32,7 +32,6 @@ class FeatureExtractor():
 
     def __call__(self, x):
         outputs = []
-        self.gradients = []
         for name, module in self.model._modules.items():
             x = module(x) # compute this layer
             if name in self.target_layers:
@@ -103,21 +102,15 @@ def grad_cam(model, target_layer_names, extractor, input, index=1):
     # cam_volume = np.clip(cam_volume, 0.01, 1.5)
     # cam_volume = cam_volume / np.max(cam_volume)
 
-    return cam_volume
+    return cam_volume, output.mean(dim=0, keepdim=True)
 
 def show_cam_on_image(imgs, masks, outpath):
-    win = (60, 130)
-    yMin = int(win[0] - 0.5 * win[1])
-    yMax = int(win[0] + 0.5 * win[1])
 
     if not os.path.exists(outpath):
         os.makedirs(outpath)
 
     for idx, (img, mask) in enumerate(zip(imgs, masks)):
-        img = np.float32((np.clip(img, yMin, yMax) - yMin) / (yMax - yMin))
-        img = cv2.resize(img, (224, 224))
-        img = np.repeat(img[:, :, np.newaxis], 3, axis=2)
-        
+
         heatmap = cv2.applyColorMap(np.uint8(255*mask), cv2.COLORMAP_JET)
         heatmap = np.float32(heatmap) / 255
 

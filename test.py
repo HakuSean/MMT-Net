@@ -68,6 +68,7 @@ if __name__ == '__main__':
     test_logger.info('Initial Definition time: {}'.format(time.time() - start))
 
     score_lists = list()
+    mask_lists = None
 
     # prepare for value range
     if args.input_format == 'jpg':
@@ -98,6 +99,9 @@ if __name__ == '__main__':
         snap_opts.input_format = args.input_format
         snap_opts.modality = getattr(args, 'modality', 'soft')
         snap_opts.arch = arch = checkpoint.get('arch', args.model)
+        snap_opts.no_postop = getattr(snap_opts, 'no_postop', args.no_postop)
+        snap_opts.pretrain_path = False # do not have to use pretrained in evaluation/test
+        target_layer_names = ['layer4']
 
         # load model
         if snap_opts.model_type == '3d':
@@ -108,40 +112,37 @@ if __name__ == '__main__':
             model, snap_opts = generate_2d(snap_opts)
 
         # load model states
+        model = nn.DataParallel(model)
         model.load_state_dict(checkpoint['state_dict'])
 
         # -----------------------------------
         # --- Prepare data ------------------
         # -----------------------------------
 
-        # prepare normalization method
+        # prepare spatial_transform for 3d/tsn/2d accordingly
         if snap_opts.model_type == '3d' or snap_opts.model_type == 'tsn':
             if snap_opts.no_mean_norm and not snap_opts.std_norm:
-                norm_method = GroupNormalize([0.], [1.])
+                norm_method = GroupNormalize([0.], [1.], cuda=torch.cuda.is_available())
             elif not snap_opts.std_norm:
-                norm_method = GroupNormalize(model.module.input_mean, [1.]) # by default
+                norm_method = GroupNormalize(model.module.input_mean, [1.], cuda=torch.cuda.is_available()) # by default
             else:
-                norm_method = GroupNormalize(model.module.input_mean, model.module.input_std) # the model is already wrapped by DataParalell
+                norm_method = GroupNormalize(model.module.input_mean, model.module.input_std, cuda=torch.cuda.is_available()) # the model is already wrapped by DataParalell
 
             # get input_size other wise use the sample_size
-            crop_size = getattr(model.module, 'input_size', snap_opts.sample_size)
-
-            spatial_transform = transforms.Compose([
-                GroupResize(snap_opts.sample_size if snap_opts.model_type == 'tsn' and snap_opts.sample_size >= 300 else 512),  
-                GroupFiveCrop(crop_size),
-                ToTorchTensor(snap_opts.model_type, norm=norm_value, caffe_pretrain=snap_opts.arch == 'BNInception'),
-                norm_method, 
-            ])
+            crop_size = getattr(model.module, 'input_size', snap_opts.sample_size) 
         else:
-            spatial_transform = transforms.Compose([
-                GroupResize(snap_opts.sample_size),
-                GroupCenterCrop(snap_opts.sample_size),
-                ToTorchTensor(snap_opts.model_type),
-                GroupNormalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-                ])          
+            norm_method = GroupNormalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225], cuda=torch.cuda.is_available())
+            crop_size = snap_opts.sample_size
+
+        # define spatial/temporal transforms
+        spatial_transform = transforms.Compose([
+            GroupResize(crop_size),
+            ToTorchTensor(snap_opts.model_type, norm=norm_value, caffe_pretrain=snap_opts.arch == 'BNInception'),
+        ])
                   
         temporal_transform = TemporalSegmentCrop(snap_opts.n_slices, snap_opts.sample_thickness, test=True)
 
+        # define dataset and dataloader
         test_data = CTDataSet(test_list, snap_opts, spatial_transform, temporal_transform)
         test_loader = torch.utils.data.DataLoader(
             test_data,
@@ -151,9 +152,10 @@ if __name__ == '__main__':
             pin_memory=True)
 
         print('Preparation time for {}-{} is {}'.format(arch, snap_opts.model_type, time.time() - start))
-        
-        scores = predict(test_loader, model, snap_opts, concern_label=args.concern_label)
+        masks, scores = predict(test_loader, model, norm_method, target_layer_names, concern_label=args.concern_label)
+
         score_lists.append(np.array(scores))
+        mask_lists = np.array(masks) if mask_lists is None else mask_lists + np.array(masks)
 
         print('Prediction time for {}-{} is {}'.format(arch, snap_opts.model_type, time.time() - start))
 
@@ -162,19 +164,23 @@ if __name__ == '__main__':
     # -----------------------------------
 
     # score_aggregation
+    HEMO, POST = 1, 2
     final_scores = np.zeros_like(scores)
-    for s, w in zip(score_lists, score_weights):
-        final_scores += w * softmax(s) # should use softmax, so the score values in different models should be comparable 
 
-    # print and save predictions
-    if not args.threshold == 0.5: 
-        pred_labels = (final_scores[:, args.concern_label] >= args.threshold).astype(int)
-        test_logger.info('Use >={} for non-hemorrhage (label 1).'.format(args.threshold))
+    if args.fusion_type == 'avg':
+        for s, w in zip(score_lists, score_weights):
+            final_scores += w / (1 + np.exp(-s)) # should use sigmoid, so the score values in different models should be comparable
+        args.threshold = args.threshold * len(score_weights)
+    elif args.fusion_type == 'max':
+        for score_id, score_value in enumerate(zip(*score_lists)):
+            final_scores[score_id] = 1/ (1+ np.exp(-np.array(score_value).max(axis=0)))
+
+    if args.no_postop:
+        pred_labels = np.array([int(i[HEMO] >= args.threshold) for i in final_scores])
     else:
-        pred_labels = (final_scores.argmax(axis=1))
+        pred_labels = np.array([int(i[HEMO] >= args.threshold and i[HEMO] - i[POST] >= 0.2) for i in final_scores])
 
-    for i, label in enumerate(pred_labels):
-        file = test_data.ct_list[i].path
+    for i, ((img, label, path), mask) in enumerate(zip(test_loader, mask_lists)):
 
         test_logger.info(
             'Case: [{0}/{1}]\t'
@@ -182,8 +188,13 @@ if __name__ == '__main__':
             'Pred: {3}'.format(
             i + 1, 
             len(test_data), 
-            file.split('/')[-1], 
+            path[0], 
             label))
+
+        if label[args.concern_label]:
+            # prepare image for printout:
+            show_cam_on_image(img.squeeze().permute((0, 2, 3, 1)).numpy(), mask / len(args.test_models), os.path.join(outpath,path[0]))
+
 
         # if not label == args.concern_label:  # i.e. non-hemorrhage
         #     test_logger.info('There is no hemorrhage in the case by prediction.')

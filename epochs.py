@@ -5,7 +5,7 @@ import time
 import os
 import ipdb
 
-from utils import AverageMeter, calculate_accuracy, f1_score, fuse_2d
+from utils import AverageMeter, calculate_accuracy, f1_score, fuse_2d, grad_cam, show_cam_on_image, ModelOutputs
 import numpy as np
 from sklearn.metrics import average_precision_score
 
@@ -28,7 +28,7 @@ def train_epoch(epoch, data_loader, model, criterion, optimizer, opt, logger):
     model.train()
 
     end_time = time.time()
-    for iteration, (inputs, targets) in enumerate(data_loader):
+    for iteration, (inputs, targets, _) in enumerate(data_loader):
         data_time.update(time.time() - end_time)
 
         if torch.cuda.is_available():
@@ -93,7 +93,7 @@ def val_epoch(epoch, data_loader, model, criterion, opt, logger):
     all_targets = list()
 
     with torch.no_grad():
-        for i, (inputs, targets) in enumerate(data_loader):
+        for i, (inputs, targets, _) in enumerate(data_loader):
             data_time.update(time.time() - end_time)
 
             if torch.cuda.is_available():
@@ -151,7 +151,7 @@ def evaluate_model(data_loader, model, criterion, opt, logger, concern_label=1):
     targets_label = []
 
     with torch.no_grad():
-        for i, (inputs, targets) in enumerate(data_loader): # each time only read one instance
+        for i, (inputs, targets, path) in enumerate(data_loader): # each time only read one instance
 
             data_time.update(time.time() - end_time)
 
@@ -159,7 +159,6 @@ def evaluate_model(data_loader, model, criterion, opt, logger, concern_label=1):
                 inputs = inputs.cuda()
                 targets = targets[0].unsqueeze(0).cuda()
 
-            # for 3D models, use FiveCrop and mean on each
             # The outputs are only fc outputs (without softmax)
             if not opt.model_type == '2d':
                 outputs = model(inputs.view((-1,) + inputs.shape[-4:]))
@@ -181,11 +180,13 @@ def evaluate_model(data_loader, model, criterion, opt, logger, concern_label=1):
                 'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                 'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
                 'Loss {2:4f} ({losses.avg:.3f})\t'
-                'Acc {3} (gt {4}, score {5:.4f})'.format(
+                'Acc {3} (gt {4}, score {5:.4f})\t'
+                'Name {6}'.format(
                 i + 1,
                 len(data_loader),
                 loss.item(),
                 int(pred == gt), gt, outputs[0][1].item(),
+                path[0],
                 batch_time=batch_time,
                 data_time=data_time,
                 losses=losses))
@@ -210,29 +211,29 @@ def evaluate_model(data_loader, model, criterion, opt, logger, concern_label=1):
     return outputs_score
 
 
-def predict(data_loader, model, opt, concern_label=1):
+def predict(data_loader, model, norm_method, target_layer_names, concern_label=1):
     # batch_size must be one.
 
     model.eval()
+    if not getattr(model, 'module', None): # consider with/without dataparallel
+        extractor = ModelOutputs(model, target_layer_names)
+    else:
+        extractor = ModelOutputs(model.module, target_layer_names)
 
-    outputs_score = []
+    outputs_score = list()
+    masks = list()
 
-    with torch.no_grad():
-        for i, (inputs, targets) in enumerate(data_loader): # each time only read one instance
-            if torch.cuda.is_available():
-                inputs = inputs.cuda()
-                targets = targets[0].unsqueeze(0).cuda()
+    for i, (inputs, targets, _) in enumerate(data_loader): # each time only read one instance
+        if torch.cuda.is_available():
+            inputs = inputs.squeeze().cuda()
+            targets = targets[0].unsqueeze(0).cuda()
+        
+        # extract masks and scores
+        # masks: list of masks, len(masks)=30, masks[0].shape = (224, 224)
+        # scores: a tensor of (1, 8) or (1, 7), depend on no_postop
+        mask, score = grad_cam(model, target_layer_names, extractor, norm_method(inputs), index=concern_label)
 
-            if opt.model_type == 'tsn':
-                outputs = model(inputs.view((-1,) + inputs.shape[-3:]))
-                outputs = outputs.view(len(targets), -1, outputs.shape[-1]).mean(dim=1)  # max(dim=1)[0] or mean(dim=1)
-            elif opt.model_type == '3d':
-                outputs = model(inputs.view((-1,) + inputs.shape[-4:]))
-                outputs = outputs.view(len(targets), -1, outputs.shape[-1]).mean(dim=1)  # max(dim=1)[0] or mean(dim=1)
-            else: # for 2d: output should be fused into one result
-                outputs = model(inputs.squeeze())
-                outputs = fuse_2d(outputs, thresh=0.025)
+        outputs_score.append([round(s.item(), 4) for s in score.cpu()[0]])
+        masks.append(mask)
 
-            outputs_score.append([round(s.item(), 4) for s in outputs.cpu()[0]])
-
-    return outputs_score
+    return np.array(masks), outputs_score

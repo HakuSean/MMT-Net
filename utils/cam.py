@@ -28,7 +28,7 @@ class FeatureExtractor():
         self.gradients = []
 
     def save_gradient(self, grad):
-        self.gradients.append(grad)
+        self.gradients.append(grad.cpu())
 
     def __call__(self, x):
         outputs = []
@@ -58,51 +58,37 @@ class ModelOutputs():
         return target_activations, output
 
 
-def grad_cam(model, target_layer_names, extractor, input, index=1):
+def grad_cam(target_layer_names, extractor, input, index=1):
     features, output = extractor(input)
     if index == None:
         index = np.argmax(output.cpu().data.numpy())
 
-    cam_volume = list()
+    one_hot = torch.zeros_like(output)
+    one_hot[:, index] = 1
+    one_hot = torch.sum(one_hot * output) # only consider the output based on the one-hot vector
 
-    # consider each slice:
-    for idx, slice in enumerate(output):
+    extractor.model.zero_grad()
+    one_hot.backward(retain_graph=True)
 
-        # define the class to print
-        one_hot = np.zeros((1, output.size()[-1]), dtype = np.float32)
-        one_hot[0][index] = 1
-        one_hot = torch.tensor(one_hot, requires_grad = True)
-        one_hot = torch.sum(one_hot.cuda() * slice) # only consider the output based on the one-hot vector
+    grads_val = extractor.get_gradients()[-1].cuda()
 
-        model.zero_grad()
-        one_hot.backward(retain_graph=True)
+    target = features[-1]
+    weights = torch.mean(grads_val, axis = (2, 3))
+    cam_volume = torch.zeros((target.size()[0],) + target.size()[2:])
 
-        grads_val = extractor.get_gradients()[-1][idx].cpu().data.numpy()
+    for i, (w, cam) in enumerate(zip(weights, target)):
+        cam_volume[i] = torch.matmul(cam.permute((1, 2, 0)), w).squeeze()
 
-        target = features[-1][idx]
-        target = target.cpu().data.numpy()
+    # upsample image to correct size/value
+    cam_volume = np.maximum(cam_volume.cpu().data.numpy(), 0) # only keep values >= 0
+    max_value = np.max(cam_volume)
 
-        weights = np.mean(grads_val, axis = (1, 2))
-        cam = np.zeros(target.shape[1: ], dtype = np.float32)
-
-        for i, w in enumerate(weights):
-            cam += w * target[i, :, :]
-
-        # upsample image to correct size
-        cam = np.maximum(cam, 0)
-        cam = cv2.resize(cam, (224, 224))
-        cam = np.clip(cam, 0.1, 10)
-        cam = (cam - 0.1) / np.max(cam)
-
-        cam_volume.append(cam)
-
-    # normalize for the whole volume:
-    # import ipdb
-    # ipdb.set_trace()
-    # cam_volume = np.clip(cam_volume, 0.01, 1.5)
-    # cam_volume = cam_volume / np.max(cam_volume)
+    cam_volume = [cv2.resize(cam, (224, 224)) for cam in cam_volume] # resize
+    cam_volume = np.array([np.clip(cam, 0.2, max_value) for cam in cam_volume])
+    cam_volume = np.clip((cam_volume - 0.2) / (max_value * 0.9), 0, 1)
 
     return cam_volume, output.mean(dim=0, keepdim=True)
+
 
 def show_cam_on_image(imgs, masks, outpath):
 
@@ -119,19 +105,3 @@ def show_cam_on_image(imgs, masks, outpath):
         cv2.imwrite(os.path.join(outpath, "cam{:03d}.jpg".format(idx)), np.uint8(255 * cam))
         cv2.imwrite(os.path.join(outpath, "img{:03d}.jpg".format(idx)), np.uint8(255 * img))
 
-
-# img = cv2.imread(args.image_path, 1)
-# img = np.float32(cv2.resize(img, (224, 224))) / 255
-# input = preprocess_image(img)
-
-# model = models.vgg19(pretrained=True)
-# target_layer_names = ["35"]
-# extractor = ModelOutputs(model, target_layer_names)
-
-# if args.use_cuda:
-#     model = model.cuda()
-#     input = input.cuda()
-
-# mask = grad_cam(model, target_layer_names, extractor, input, args.index)
-
-# show_cam_on_image(img, mask)

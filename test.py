@@ -85,7 +85,6 @@ if __name__ == '__main__':
     # ===================================
     
     for checkpoint in args.test_models:
-        start = time.time()
         # -----------------------------------
         # --- Prepare model -----------------
         # -----------------------------------
@@ -95,7 +94,6 @@ if __name__ == '__main__':
         checkpoint = torch.load(checkpoint)
 
         snap_opts = checkpoint.get('args', args)
-        snap_opts.pretrain_path = ''
         snap_opts.input_format = args.input_format
         snap_opts.modality = getattr(args, 'modality', 'soft')
         snap_opts.arch = arch = checkpoint.get('arch', args.model)
@@ -151,13 +149,13 @@ if __name__ == '__main__':
             num_workers=args.n_threads,
             pin_memory=True)
 
-        print('Preparation time for {}-{} is {}'.format(arch, snap_opts.model_type, time.time() - start))
+        # print('Preparation time for {}-{} is {}'.format(arch, snap_opts.model_type, time.time() - start))
         masks, scores = predict(test_loader, model, norm_method, target_layer_names, concern_label=args.concern_label)
 
         score_lists.append(np.array(scores))
         mask_lists = np.array(masks) if mask_lists is None else mask_lists + np.array(masks)
 
-        print('Prediction time for {}-{} is {}'.format(arch, snap_opts.model_type, time.time() - start))
+        # print('Prediction time for {}-{} is {}'.format(arch, snap_opts.model_type, time.time() - start))
 
     # -----------------------------------
     # --- Post-process Score ------------
@@ -180,7 +178,7 @@ if __name__ == '__main__':
     else:
         pred_labels = np.array([int(i[HEMO] >= args.threshold and i[HEMO] - i[POST] >= 0.2) for i in final_scores])
 
-    for i, ((img, label, path), mask) in enumerate(zip(test_loader, mask_lists)):
+    for i, ((img, _, path), mask, label) in enumerate(zip(test_loader, mask_lists, pred_labels)):
 
         test_logger.info(
             'Case: [{0}/{1}]\t'
@@ -191,11 +189,12 @@ if __name__ == '__main__':
             path[0], 
             label))
 
-        if label[args.concern_label]:
+        if label:
             # prepare image for printout:
             show_cam_on_image(img.squeeze().permute((0, 2, 3, 1)).numpy(), mask / len(args.test_models), os.path.join(outpath,path[0]))
 
-
+    print('Prediction time per case is {}'.format((time.time() - start) / len(test_data)))
+    
         # if not label == args.concern_label:  # i.e. non-hemorrhage
         #     test_logger.info('There is no hemorrhage in the case by prediction.')
         #     os.system('rm -r {}'.format(file))

@@ -231,9 +231,13 @@ def predict(data_loader, model, norm_method, target_layer_names, concern_label=1
         # extract masks and scores
         # masks: list of masks, len(masks)=30, masks[0].shape = (224, 224)
         # scores: a tensor of (1, 8) or (1, 7), depend on no_postop
-        mask, score = grad_cam(model, target_layer_names, extractor, norm_method(inputs), index=concern_label)
+        mask, score = grad_cam(target_layer_names, extractor, norm_method(inputs), index=concern_label)
 
         outputs_score.append([round(s.item(), 4) for s in score.cpu()[0]])
         masks.append(mask)
+
+        # release cuda memory
+        torch.cuda.empty_cache()
+        del mask, score, inputs
 
     return np.array(masks), outputs_score

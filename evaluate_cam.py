@@ -188,7 +188,7 @@ if __name__ == '__main__':
             # extract masks and scores
             # masks: list of masks, len(masks)=30, masks[0].shape = (224, 224)
             # scores: a tensor of (1, 8) or (1, 7), depend on no_postop
-            masks, score = grad_cam(model, target_layer_names, extractor, norm_method(inputs), index=args.concern_label)
+            masks, score = grad_cam(target_layer_names, extractor, norm_method(inputs), index=args.concern_label)
 
             # prepare image for printout:
             show_cam_on_image(inputs.permute((0, 2, 3, 1)).cpu().numpy(), masks, os.path.join(outpath, paths[0]))

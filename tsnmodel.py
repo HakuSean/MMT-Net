@@ -27,7 +27,9 @@ def generate_tsn(args):
     if not args.sample_size:
         args.sample_size = model.input_size
     
-    print(("""
+    # print only in training
+    if args.pretrain_path:
+        print(("""
 Initializing CTSN with base model: {}.
 CTSN Configurations:
     num_segments:       {}

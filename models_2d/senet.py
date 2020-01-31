@@ -447,7 +447,8 @@ def initialize_pretrained_model(model, num_classes, settings, pretrained):
 def senet154(num_classes=1000, pretrained='imagenet'):
     model = SENet(SEBottleneck, [3, 8, 36, 3], groups=64, reduction=16,
                   dropout_p=0.2, num_classes=num_classes)
-    if pretrained:
+    if pretrained == 'imagenet':
+        print('Load imagenet pretrained weights')
         settings = pretrained_settings['senet154']['imagenet']
         initialize_pretrained_model(model, num_classes, settings, pretrained)
     return model
@@ -458,7 +459,8 @@ def se_resnet50(num_classes=1000, pretrained='imagenet'):
                   dropout_p=None, inplanes=64, input_3x3=False,
                   downsample_kernel_size=1, downsample_padding=0,
                   num_classes=num_classes)
-    if pretrained:
+    if pretrained == 'imagenet':
+        print('Load imagenet pretrained weights')
         settings = pretrained_settings['se_resnet50']['imagenet']
         initialize_pretrained_model(model, num_classes, settings, pretrained)
     return model
@@ -469,7 +471,8 @@ def se_resnet101(num_classes=1000, pretrained='imagenet'):
                   dropout_p=None, inplanes=64, input_3x3=False,
                   downsample_kernel_size=1, downsample_padding=0,
                   num_classes=num_classes)
-    if pretrained:
+    if pretrained == 'imagenet':
+        print('Load imagenet pretrained weights')
         settings = pretrained_settings['se_resnet101']['imagenet']
         initialize_pretrained_model(model, num_classes, settings, pretrained)
     return model
@@ -480,7 +483,8 @@ def se_resnet152(num_classes=1000, pretrained='imagenet'):
                   dropout_p=None, inplanes=64, input_3x3=False,
                   downsample_kernel_size=1, downsample_padding=0,
                   num_classes=num_classes)
-    if pretrained:
+    if pretrained == 'imagenet':
+        print('Load imagenet pretrained weights')
         settings = pretrained_settings['se_resnet152']['imagenet']
         initialize_pretrained_model(model, num_classes, settings, pretrained)
     return model
@@ -491,7 +495,8 @@ def se_resnext50_32x4d(num_classes=1000, pretrained='imagenet'):
                   dropout_p=None, inplanes=64, input_3x3=False,
                   downsample_kernel_size=1, downsample_padding=0,
                   num_classes=num_classes)
-    if pretrained:
+    if pretrained == 'imagenet':
+        print('Load imagenet pretrained weights')
         settings = pretrained_settings['se_resnext50_32x4d']['imagenet']
         initialize_pretrained_model(model, num_classes, settings, pretrained)
     return model
@@ -502,7 +507,8 @@ def se_resnext101_32x4d(num_classes=1000, pretrained='imagenet'):
                   dropout_p=None, inplanes=64, input_3x3=False,
                   downsample_kernel_size=1, downsample_padding=0,
                   num_classes=num_classes)
-    if pretrained:
+    if pretrained == 'imagenet':
+        print('Load imagenet pretrained weights')
         settings = pretrained_settings['se_resnext101_32x4d']['imagenet']
         initialize_pretrained_model(model, num_classes, settings, pretrained)
     return model

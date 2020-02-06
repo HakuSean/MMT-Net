@@ -45,14 +45,14 @@ if __name__ == '__main__':
     start = time.time()
 
     # input label files
-    train_list = os.path.join(args.annotation_path, 'training_' + args.dataset + '.txt')
-    val_list = os.path.join(args.annotation_path, 'validation_' + args.dataset + '.txt')
+    train_list = os.path.join(args.annotation_path + args.dataset, 'training_' + args.split + '.txt')
+    val_list = os.path.join(args.annotation_path + args.dataset, 'validation_' + args.split + '.txt')
 
     # set directory to save logs and training outputs
     if args.tag:
         args.tag = '_' + args.tag
 
-    outpath = os.path.join(args.result_path, 'split_' + args.dataset + args.tag)
+    outpath = os.path.join(args.result_path, args.dataset + '_split' + args.split + '_' + args.tag)
     if not os.path.exists(outpath):
         os.makedirs(outpath)
     

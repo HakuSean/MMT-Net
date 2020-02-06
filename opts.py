@@ -7,11 +7,11 @@ def parse_opts():
     # ---------------------------------------------
     # -- Input and Output -------------------------
     # ---------------------------------------------
-    parser.add_argument('dataset', type=str, default='0',
-                        help='The number of split with in the 5_fold model. OR use single case for testing')
-    # parser.add_argument('--ct_path', type=str, default='/home/dongang/Documents/crcp/data/', 
-    #                     help='Directory path of dataset')
-    parser.add_argument('--annotation_path', type=str, default='../DataPreparation/labels/hemorrhage/5_fold',
+    parser.add_argument('dataset', type=str, choices=['rsna', 'imed'],
+                        help='The subset of rsna or imed')
+    parser.add_argument('--split', type=str, default='0', 
+                        help='The number of split of 5_fold')
+    parser.add_argument('--annotation_path', type=str, default='./labels/hemorrhage_',
                         help='Annotation file path')
     parser.add_argument('--result_path', type=str, default='./results',
                         help='Result directory path. ')
@@ -87,8 +87,8 @@ def parse_opts():
                         help='Wide resnet k')
     parser.add_argument('--resnext_cardinality', type=int, default=32,
                         help='ResNeXt cardinality')
-    parser.add_argument('--n_classes', type=int, default=8,
-                        help='Number of classes 3 (critical: 0, non-critical: 1, normal: 2), other wise: 0: concern, 1: non')
+    # parser.add_argument('--n_classes', type=int, default=8,
+    #                     help='Number of classes 3 (critical: 0, non-critical: 1, normal: 2), other wise: 0: concern, 1: non')
     parser.add_argument('--attention_size', type=int, default=0,
                         help='Hidden layer size of attention.')
     parser.add_argument('--use_se', action='store_true', default=False,
@@ -138,8 +138,6 @@ def parse_opts():
                         help='gradient norm clipping (default: disabled)')
     parser.add_argument('--no_partialbn', '--pb', default=False, action="store_true",
                         help='Whether to use partialbn for training (default: yes)')
-    parser.add_argument('--no_postop', action='store_true', default=False,
-                        help='Do not include postop cases in training/prediction.')
 
     # ---------------------------------------------
     # -- Val and Test -----------------------------
@@ -164,11 +162,9 @@ def parse_opts():
 
     args = parser.parse_args()
 
-    # no_postop = args.n_classes == 7 and vice versa
-    if args.no_postop and args.n_classes >= 7:
+    if args.dataset == 'rsna':
+        args.n_classes = 6
+    else:
         args.n_classes = 7
-
-    if args.n_classes and not args.no_postop:
-        args.no_postop = True
 
     return args

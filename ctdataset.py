@@ -13,11 +13,14 @@ class CTRecord(object):
     '''
     Input: 
         row: should be a list of strings, at least one component
-        num_classes: in total 9 classes (5 subtypes and non/normal/any/exclude, normal is 0)
+    Tip:
+        in total 8 classes (5 subtypes and non/normal/any, normal is 0)
+        For IMed, the output label should be 7, i.e non, any, 5 sub types, normal is all 0.
+        For RSNA, there is no non, so the class should be 6
+
     '''
-    def __init__(self, row, num_classes=8):
+    def __init__(self, row):
         self._data = row
-        self.num = num_classes
         self._num_slices = int(row[1]) if len(row) == 3 else -1
 
     @property
@@ -32,29 +35,19 @@ class CTRecord(object):
 
         tags = self._data[-1].split(',')
 
-        # consider single-label classification, num_class is small
-        if self.num < 5: # non-hemo(0) vs hemo(1) vs bad_images (2)
-            if '3' in tags:
-                out = 2 # bad img
-            elif '2' in tags:
-                out = 1 # hemo
+        out = [0.] * 7
+        for i in tags:
+            if i == '0':
+                return out
+            elif i == '1' or i == '2':
+                out[int(i) - 1] = 1.
             else:
-                out = 0 # others
-        # consider multi-label classification
-        else:
-            out = [0.] * self.num
-            for i in tags:
-                if i == '0':
-                    # consider multi-label classification with non-hemo + normal together
-                    # out[0] = 1.
-                    return out
+                out[int(i) - 2] = 1.
 
-                # consider multi-label classification without postop/normal
-                if self.num == 7 and int(i) > 2:
-                    out[int(i) - 2] = 1.
-                else:    
-                    out[int(i) - 1] = 1.
-        return out
+        if 'rsna' in self._data[0]:
+            return out[1:]
+        else:
+            return out
 
     @property
     def num_slices(self):
@@ -64,6 +57,9 @@ class CTRecord(object):
     def num_slices(self, value):
         if self._num_slices == -1 and value > 0:
             self._num_slices = value
+
+    def __repr__(self):
+        return self._data[0]
 
 
 class CTDataSet(data.Dataset):
@@ -83,7 +79,6 @@ class CTDataSet(data.Dataset):
         self.modality = opts.modality
         self.model_type = opts.model_type # used for the different preprocessing methods for 2D model
         self.dtype = torch.long if opts.loss_type == 'ce' else torch.float32
-        self.no_postop = opts.no_postop
 
         if os.path.isfile(list_file):
             self._parse_list()
@@ -183,6 +178,13 @@ class CTDataSet(data.Dataset):
 
         return record, samples
 
+    def _cal_mask(self):
+        '''
+        This function is used to calculate the mask of brain from the original 3d slices.
+        If it is fast enough, then this function can be used every time when load data. Otherwise,
+        the masks will be calculated once and stored in memory for each case.
+        '''
+        pass
 
     def _parse_list(self):
         self.ct_list = list()
@@ -207,11 +209,6 @@ class CTDataSet(data.Dataset):
 
         # start make row
         for x in open(self.list_file):
-            # ignore post-operative cases for args.no_postop
-            if self.no_postop:
-                if ',3' in x or '3,' in x or '3\n' in x:
-                    continue
-
             row = x.strip().split(' - ')[-1].rsplit(' ', max_split) # deal with logs
 
             # skip cases that does not exist
@@ -219,7 +216,7 @@ class CTDataSet(data.Dataset):
                 print(row[0], 'does not exist...')
                 continue
 
-            self.ct_list.append(CTRecord(row, self.num_classes))
+            self.ct_list.append(CTRecord(row))
             if self.dtype == torch.long: # i.e. cross entropy
                 self.class_count[self.ct_list[-1].label] += 1
             else: # i.e. binary cross entropy with loss

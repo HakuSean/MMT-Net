@@ -6,12 +6,14 @@ from __future__ import print_function, division, absolute_import
 from collections import OrderedDict
 import math
 import os
+from .partialconv import PartialConv2d
 
 import torch.nn as nn
 from torch.utils import model_zoo
 
 __all__ = ['SENet', 'senet154', 'se_resnet50', 'se_resnet101', 'se_resnet152',
-           'se_resnext50_32x4d', 'se_resnext101_32x4d', 'se_resnet18', 'se_resnext18_32x4d']
+           'se_resnext50_32x4d', 'se_resnext101_32x4d', 'se_resnet18', 'se_resnext18_32x4d',
+           'pse_resnext50_32x4d']
 
 pretrained_settings = {
     'senet154': {
@@ -92,6 +94,28 @@ class SEModule(nn.Module):
                              padding=0)
         self.relu = nn.ReLU(inplace=True)
         self.fc2 = nn.Conv2d(channels // reduction, channels, kernel_size=1,
+                             padding=0)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        module_input = x
+        x = self.avg_pool(x)
+        x = self.fc1(x)
+        x = self.relu(x)
+        x = self.fc2(x)
+        x = self.sigmoid(x)
+        return module_input * x
+
+
+class PSEModule(nn.Module):
+
+    def __init__(self, channels, reduction):
+        super(SEModule, self).__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.fc1 = nn.PartialConv2d(channels, channels // reduction, kernel_size=1,
+                             padding=0)
+        self.relu = nn.ReLU(inplace=True)
+        self.fc2 = nn.PartialConv2d(channels // reduction, channels, kernel_size=1,
                              padding=0)
         self.sigmoid = nn.Sigmoid()
 
@@ -265,6 +289,29 @@ class SEResNeXtBottleneck(Bottleneck):
         self.bn3 = nn.BatchNorm2d(planes * 4)
         self.relu = nn.ReLU(inplace=True)
         self.se_module = SEModule(planes * 4, reduction=reduction)
+        self.downsample = downsample
+        self.stride = stride
+
+class PSEResNeXtBottleneck(Bottleneck):
+    """
+    ResNeXt bottleneck type C with a Squeeze-and-Excitation module.
+    """
+    expansion = 4
+
+    def __init__(self, inplanes, planes, groups, reduction, stride=1,
+                 downsample=None, base_width=4):
+        super(SEResNeXtBottleneck, self).__init__()
+        width = math.floor(planes * (base_width / 64)) * groups
+        self.conv1 = nn.PartialConv2d(inplanes, width, kernel_size=1, bias=False,
+                               stride=1)
+        self.bn1 = nn.BatchNorm2d(width)
+        self.conv2 = nn.PartialConv2d(width, width, kernel_size=3, stride=stride,
+                               padding=1, groups=groups, bias=False)
+        self.bn2 = nn.BatchNorm2d(width)
+        self.conv3 = nn.PartialConv2d(width, planes * 4, kernel_size=1, bias=False)
+        self.bn3 = nn.BatchNorm2d(planes * 4)
+        self.relu = nn.ReLU(inplace=True)
+        self.se_module = PSEModule(planes * 4, reduction=reduction)
         self.downsample = downsample
         self.stride = stride
 
@@ -527,4 +574,16 @@ def se_resnext18_32x4d(num_classes=1000, pretrained='imagenet'):
                   dropout_p=None, inplanes=64, input_3x3=False,
                   downsample_kernel_size=1, downsample_padding=0,
                   num_classes=num_classes)
+    return model
+
+
+def pse_resnext50_32x4d(num_classes=1000, pretrained='imagenet'):
+    model = SENet(PSEResNeXtBottleneck, [3, 4, 6, 3], groups=32, reduction=16,
+                  dropout_p=None, inplanes=64, input_3x3=False,
+                  downsample_kernel_size=1, downsample_padding=0,
+                  num_classes=num_classes)
+    if pretrained == 'imagenet':
+        print('Load imagenet pretrained weights')
+        settings = pretrained_settings['se_resnext50_32x4d']['imagenet']
+        initialize_pretrained_model(model, num_classes, settings, pretrained)
     return model

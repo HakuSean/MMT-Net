@@ -38,7 +38,7 @@ class CTRecord(object):
         out = [0.] * 7
         for i in tags:
             if i == '0':
-                return out
+                break
             elif i == '1' or i == '2':
                 out[int(i) - 1] = 1.
             else:

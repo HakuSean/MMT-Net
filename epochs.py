@@ -49,7 +49,7 @@ def train_epoch(epoch, data_loader, model, criterion, optimizer, opt, logger):
         neg = 0
         pos = 0
         for i in range(len(targets)):
-            if (not targets[i].shape and targets[i]==1) or (targets[i].shape and targets[i].cpu().numpy()[1]):
+            if (not targets[i].shape and targets[i]==1) or (targets[i].shape and targets[i].cpu().numpy()[opt.concern_label]):
                 if pos < 2:
                     print('positive logits:', outputs[i].data.cpu(), targets[i].data.cpu(), loss[i].mean().item())
                     pos += 1
@@ -128,7 +128,7 @@ def val_epoch(epoch, data_loader, model, criterion, opt, logger):
     
     else:
         mAP = average_precision_score(np.array(all_targets), np.array(all_outputs))
-        hemo_ap = average_precision_score(np.array(all_targets)[:, 1], np.array(all_outputs)[:, 1])
+        hemo_ap = average_precision_score(np.array(all_targets)[:, opt.concern_label], np.array(all_outputs)[:, opt.concern_label])
         logger.info(('Testing Results: mAP {0:.4f} ap for hemorrhage {1:.4f} Loss {loss.avg:.5f}'
             .format(mAP, hemo_ap, loss=losses)))
 
@@ -172,8 +172,8 @@ def evaluate_model(data_loader, model, criterion, opt, logger, concern_label=1):
             batch_time.update(time.time() - end_time)
             end_time = time.time()
 
-            gt = int(targets[0][1].item())
-            pred = 1 if outputs[0][1].item() > 0 else 0
+            gt = int(targets[0][opt.concern_label].item())
+            pred = 1 if outputs[0][opt.concern_label].item() > 0 else 0
 
             logger.info(
                 'Case: [{0}/{1}]\t'
@@ -185,7 +185,7 @@ def evaluate_model(data_loader, model, criterion, opt, logger, concern_label=1):
                 i + 1,
                 len(data_loader),
                 loss.item(),
-                int(pred == gt), gt, outputs[0][1].item(),
+                int(pred == gt), gt, outputs[0][opt.concern_label].item(),
                 path[0],
                 batch_time=batch_time,
                 data_time=data_time,
@@ -193,7 +193,7 @@ def evaluate_model(data_loader, model, criterion, opt, logger, concern_label=1):
 
             # get hemorrage results
             outputs_label.append(pred)
-            targets_label.append(int(targets[0][1].item()))
+            targets_label.append(int(targets[0][opt.concern_label].item()))
             outputs_score.append([round(s.item(), 4) for s in outputs.cpu()[0]])
 
             # # select out the bad

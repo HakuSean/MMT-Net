@@ -164,7 +164,9 @@ def parse_opts():
 
     if args.dataset == 'rsna':
         args.n_classes = 6
+        args.concern_label = 0
     else:
         args.n_classes = 7
+        args.concern_label = 1
 
     return args

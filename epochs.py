@@ -1,5 +1,6 @@
 import torch
 from torch.nn.utils import clip_grad_norm
+import torch.nn.functional as F
 
 import time
 import os
@@ -38,9 +39,25 @@ def train_epoch(epoch, data_loader, model, criterion, optimizer, opt, logger):
         outputs = model(inputs)
 
         loss = criterion(outputs, targets)       
-        losses.update(loss.mean().item(), inputs.size(0))
 
-        with amp.scale_loss(loss.mean(), optimizer) as scaled_loss:
+        # update with hard examples when learning rate is small
+        if epoch > opt.n_epochs * 0.5 - 1:
+            large_loss = F.threshold(loss.mean(axis=1), 0.8, 0., inplace=True)
+            small_loss = F.threshold(loss.mean(axis=1), 0.2, 0., inplace=True)
+            if (large_loss > 0).any():
+                back_loss = large_loss.sum() / (large_loss > 0).sum()
+                # print((back_loss > 0).sum().cpu().item() / opt.batch_size)
+            elif (small_loss > 0).any():
+                back_loss = small_loss.sum() / (small_loss > 0).sum()
+                # print((back_loss > 0).sum().cpu().item() / opt.batch_size)
+            else:
+                back_loss = loss.mean()
+        else:
+            back_loss = loss.mean()
+
+        losses.update(back_loss.item(), inputs.size(0))
+
+        with amp.scale_loss(back_loss, optimizer) as scaled_loss:
             scaled_loss.backward()
 
         # loss.backward()

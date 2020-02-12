@@ -148,7 +148,7 @@ class CTDataSet(data.Dataset):
                     break
                 
                 _, h, w = imgs.shape
-                windows = [(40, 80), (80, 200), (40, 380)]
+                windows = [(50, 80), (40, 200), (60, 360)] # blood, brain, tissue
                 output = np.zeros((h, w, 3)) 
 
                 for frame in imgs:                    

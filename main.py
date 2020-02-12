@@ -49,9 +49,6 @@ if __name__ == '__main__':
     val_list = os.path.join(args.annotation_path + args.dataset, 'validation_' + args.split + '.txt')
 
     # set directory to save logs and training outputs
-    if args.tag:
-        args.tag = '_' + args.tag
-
     outpath = os.path.join(args.result_path, args.dataset + '_split' + args.split + '_' + args.tag)
     if not os.path.exists(outpath):
         os.makedirs(outpath)
@@ -97,11 +94,13 @@ if __name__ == '__main__':
     if args.loss_type == 'nll':
         criterion = nn.BCEWithLogitsLoss(reduction='none')
     elif args.loss_type == 'weighted':
-        weight_tensor = torch.tensor([0.5, 2, 0.5, 1, 1, 1, 1, 1], dtype=torch.float)
-        criterion = nn.BCEWithLogitsLoss(pos_weight=weight_tensor)
+        weight_tensor = torch.ones(args.n_classes, dtype=torch.float)
+        weight_tensor[args.concern_label] = 2
+        criterion = nn.BCEWithLogitsLoss(pos_weight=weight_tensor, reduction='none')
         # criterion = BCEWithLogitsWeightedLoss(args.n_classes, class_weight=weight_tensor)
     elif args.loss_type == 'focal':
-        weight_tensor = torch.tensor([1, 2, 1, 1, 1, 1, 1, 1], dtype=torch.float)
+        weight_tensor = torch.ones(args.n_classes, dtype=torch.float)
+        weight_tensor[args.concern_label] = 2
         criterion = MultiLabelFocalLoss(args.n_classes, alpha=weight_tensor)
     elif args.loss_type == 'ce':
         criterion = nn.CrossEntropyLoss(reduction='none')

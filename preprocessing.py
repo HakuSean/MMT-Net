@@ -122,62 +122,147 @@ def CountSkull(img_line):
 
 def CalMaskCV(np_img):
     # np_img: (axel, cor, sag), top-down, left-right shifted
+    # 1. extract skull: make skull connect by dilation. 
+    # 2. use skull as a boundary and set a mask. 
+    # 3. find the correct grayscale levels for brain tissue.
+
     sag_masks = list()
 
     for i in range(np_img.shape[-1]):
         img = np_img[:, :, i]
         skull = np.zeros_like(img)
+        
         # skip slice that does not contain bone
         if img.max() < 200:
             sag_masks.append(np.zeros_like(img))
             continue
 
-        # define close kernel:
-        if i < 160 or i > 350:
-            kernel = np.ones((5, 5), dtype='uint8')
-        else:
-            kernel = np.ones((20, 20), dtype='uint8')
+        # get brain pixels
+        brain = cv2.threshold(img, 95, 255, cv2.THRESH_TOZERO_INV)[1]
+        brain = cv2.threshold(brain, 5, 100, cv2.THRESH_BINARY)[1].astype('uint8')
 
-        # get skull and make skull connect
-        # method 1: cv2 threshold and close
-        # skull = cv2.inRange(img, 0, 100)
-        # skull = cv2.threshold(img, 101, 1, cv2.THRESH_BINARY)[1].astype('uint8')
-        # skull = cv2.morphologyEx(skull, cv2.MORPH_CLOSE, kernel)
-        # method 2: iterate each line
-        for iid, iline in enumerate(img):
-            skull[iid] = CountSkull(iline)
+        # morphology on brain pixels
+        erode_kernel = cv2.getStructuringElement(cv2.MORPH_CROSS, (10, 10))
+        dilate_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (10, 10))
+        brain = cv2.morphologyEx(brain, cv2.MORPH_ERODE, erode_kernel)
+        brain = cv2.morphologyEx(brain, cv2.MORPH_DILATE, dilate_kernel)
 
-        # last line:
-        boundary = ContinuousSeq(skull[iid], mean=False)
-        if len(boundary) > 2:
-            skull[iid][boundary[0]: boundary[-1]] = 1
+        # get brain contours and find the largest 
+        _, contours, _ = cv2.findContours(brain, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        areas = np.array([cv2.contourArea(c) for c in contours])
+        brain = cv2.drawContours(brain, contours, areas.argmax(), 255, -1)
 
-        ipdb.set_trace()
+        # get skull contour
+        skull = cv2.threshold(img, 95, 255, cv2.THRESH_BINARY)[1].astype('uint8') # get all the bones
+        skull = cv2.morphologyEx(skull, cv2.MORPH_DILATE, dilate_kernel)
+        _, contours, _ = cv2.findContours(brain, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        areas = np.array([cv2.contourArea(c) for c in contours])
+        brain = cv2.drawContours(brain, contours, areas.argmax(), 255, -1)
 
-        skull = cv2.morphologyEx(skull, cv2.MORPH_CLOSE, kernel).astype('uint8')
+        # floodFill with mask
+        #cv2.floodFill(brain, mask, (x, y), (color), (), (), cv2.FLOODFILL_MASK_ONLY)
+        cv2.floodFill(copyImg, mask, (220, 250), (0, 255, 255), (100, 100, 100), (50, 50 ,50), cv.FLOODFILL_FIXED_RANGE)
 
-        # get contours of skull 
-        brain, contour, hierarchy = cv2.findContours(skull, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
 
-        if hierarchy[0].sum(0)[-1] == len(hierarchy[0]) * -1: # no one has child contour
-            sag_masks.append(np.zeros_like(img))
-            continue
+        # # define close kernel (do not have to be square):
+        # if i < 160 or i > 350:
+        #     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (40, 40))# np.ones((5, 5), dtype='uint8')
+        # else:
+        #     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (40, 40))# np.ones((5, 5), dtype='uint8')
 
-        useful = list()
-        for hi, hv in enumerate(hierarchy[0]):
-            if not hv[3] == -1:
-                useful.append(contour[hi])
+        # close_kernel = cv2.getStructuringElement(cv2.MORPH_CROSS, (60, 60))# np.ones((5, 5), dtype='uint8')
 
-        if len(useful) > 1:
-            brain_contour = max(useful, key = cv2.contourArea)
-        else:
-            sag_masks.append(np.zeros_like(img))
-            continue
+        # # get skull and make skull connect
+        # # method 1: cv2 threshold and close
+        # # skull = cv2.inRange(img, 0, 100)
+        # skull = cv2.threshold(img, 90, 255, cv2.THRESH_BINARY)[1].astype('uint8') # get all the bones
+        # brain = cv2.threshold(img, 100, 255, cv2.THRESH_TOZERO_INV)[1]
+        # brain = cv2.threshold(brain, 0, 100, cv2.THRESH_BINARY)[1].astype('uint8')
 
-        # get largest area of connected brain
-        mask = np.zeros_like(img)
-        mask = cv2.fillPoly(mask, [brain_contour], 255)
-        sag_masks.append(mask)
+        # skull_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (30, 30))
+        # brain_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (40, 40))
+
+        # skull = cv2.morphologyEx(skull, cv2.MORPH_CLOSE, skull_kernel)
+        # brain = cv2.morphologyEx(brain, cv2.MORPH_OPEN, brain_kernel)
+
+        # # method 2: iterate each line
+        # for iid, iline in enumerate(img):
+        #     skull[iid] = CountSkull(iline)
+
+        # get skull contour and make a mask
+        # brain, contour, _ = cv2.findContours(skull, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # whole = cv2.drawContours(brain, contour, -1, 100, -1)
+
+
+        # # watershed
+        # ret, markers = cv2.connectedComponents(brain)
+        # markers = markers+1
+        # markers[skull==255] = 0
+
+        # ori = cv2.threshold(img, 0, 255, cv2.THRESH_TOZERO)[1]
+        # ori = cv2.threshold(ori, 200, 200, cv2.THRESH_TOZERO_INV)[1].astype('uint8')
+        # ori = cv2.cvtColor(ori, cv2.COLOR_GRAY2BGR)
+        # markers = cv2.watershed(ori, markers)
+        # ori[markers==-1] = 255
+        # brain = cv2.cvtColor(ori, cv2.COLOR_BGR2GRAY)
+
+        sag_masks.append(brain)
+
+
+
+        # get brain and make a mask
+        # brain = cv2.threshold(img, 100, 255, cv2.THRESH_TOZERO_INV)[1]
+        # brain = cv2.threshold(brain, 0, 255, cv2.THRESH_BINARY)[1].astype('uint8')
+        # brain = cv2.morphologyEx(brain, cv2.MORPH_ERODE, kernel)
+        # brain = cv2.morphologyEx(brain, cv2.MORPH_DILATE, close_kernel)
+
+
+
+        # # bilateral filter
+        # ori = cv2.threshold(img, 0, 255, cv2.THRESH_TOZERO)[1]
+        # ori = cv2.threshold(ori, 200, 200, cv2.THRESH_TOZERO_INV)[1].astype('uint8')
+        # ori = cv2.cvtColor(ori, cv2.COLOR_GRAY2BGR)
+        # brain = cv2.bilateralFilter(ori, 0, 100, 15)
+        # brain = cv2.cvtColor(brain, cv2.COLOR_BGR2GRAY)
+
+
+
+
+
+
+
+
+
+
+
+        # # last line:
+        # boundary = ContinuousSeq(skull[iid], mean=False)
+        # if len(boundary) > 2:
+        #     skull[iid][boundary[0]: boundary[-1]] = 1
+
+        # skull = cv2.morphologyEx(skull, cv2.MORPH_CLOSE, kernel).astype('uint8')
+
+        # if hierarchy[0].sum(0)[-1] == len(hierarchy[0]) * -1: # no one has child contour
+        #     sag_masks.append(np.zeros_like(img))
+        #     continue
+
+        # useful = list()
+        # for hi, hv in enumerate(hierarchy[0]):
+        #     if not hv[3] == -1:
+        #         useful.append(contour[hi])
+
+        # if len(useful) > 1:
+        #     brain_contour = max(useful, key = cv2.contourArea)
+        # else:
+        #     sag_masks.append(np.zeros_like(img))
+        #     continue
+
+        # # get largest area of connected brain
+        # mask = np.zeros_like(img)
+        # mask = cv2.fillPoly(mask, [brain_contour], 255)
+        # sag_masks.append(mask)
+
+
         # cv2.imwrite(dicom.path + '/test.png', mask) 
         # cv2.imwrite(dicom.path + '/test_ori.png', img) 
 
@@ -194,7 +279,7 @@ def CalMaskCV(np_img):
 def CalMaskSITK(sitk_img):
     # sitk_img: (sag, cor, axel), top-down, left-right shifted
     # first checkout 16 saggital view images:
-    positions = list(range(112, 401, 32))
+    positions = list(range(112, 401, 16))
     # positions = range(512)
     sag_masks = list()
     mid_point = sitk_img.GetDepth()//2
@@ -327,14 +412,14 @@ if __name__ == '__main__':
     # go through all files
     for dicom in files:
         sitk_img, np_img = ParseDicom(dicom)
-        # mask = CalMaskCV(np_img)
-        mask = CalMaskSITK(sitk_img)
+        mask = CalMaskCV(np_img)
+        # mask = CalMaskSITK(sitk_img)
 
         # make mask the same direction/origin/spacing as the original image
         mask.SetDirection(sitk_img.GetDirection())
         mask.SetOrigin(sitk_img.GetOrigin()) 
         mask.SetSpacing(sitk_img.GetSpacing())
-        sitk.WriteImage(mask, dicom.path + '/test_sitk.nii.gz')
+        sitk.WriteImage(mask, dicom.path + '/test_opencv.nii.gz')
 
         ipdb.set_trace()
         print('None')

@@ -200,12 +200,12 @@ if __name__ == '__main__':
         for score_id, score_value in enumerate(zip(*score_lists)):
             final_scores[score_id] = 1/ (1+ np.exp(-np.array(score_value).max(axis=0)))
 
-    # specific for rsna and imed
+    # specific for rsna and xnat
     if not args.subset:
         index = list(range(len(eval_data)))
     elif args.subset == 'rsna':
         index = [i for i in range(len(eval_data)) if 'ID_' in eval_data.ct_list[i].path]
-    elif args.subset == 'imed':
+    elif args.subset == 'xnat':
         index = [i for i in range(len(eval_data)) if 'ct_soft' in eval_data.ct_list[i].path]
 
     # calculate accuracy

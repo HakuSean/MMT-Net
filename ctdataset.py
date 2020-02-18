@@ -80,6 +80,10 @@ class CTDataSet(data.Dataset):
         self.model_type = opts.model_type # used for the different preprocessing methods for 2D model
         self.dtype = torch.long if opts.loss_type == 'ce' else torch.float32
 
+        # add inputs for PartialCNN
+        self.maskpath = '/raid/snac/crc/{}/masks'.format(opts.dataset)
+        self.num_channels = opts.n_channels
+
         if os.path.isfile(list_file):
             self._parse_list()
         else:
@@ -148,17 +152,26 @@ class CTDataSet(data.Dataset):
                     break
                 
                 _, h, w = imgs.shape
-                windows = [(50, 80), (40, 200), (60, 360)] # blood, brain, tissue
-                output = np.zeros((h, w, 3)) 
+
+                if self.num_channels == 3:
+                    windows = [(50, 80), (40, 200), (60, 360)] # blood, brain, tissue
+                    output = np.zeros((h, w, 3)) 
+                else:
+                    windows = [(122.5, 255)] # maximum for tissue part
+                    output = np.zeros((h, w, 1))
 
                 for frame in imgs:                    
                     for win_idx, win in enumerate(windows):
                         yMin = int(win[0] - 0.5 * win[1])
                         yMax = int(win[0] + 0.5 * win[1])
                         sub_img = np.clip(frame, yMin, yMax)
-                        output[:, :, win_idx] += (sub_img - yMin) / (yMax - yMin) * 255
+                        output[:, :, win_idx] += (sub_img - yMin) / (yMax - yMin) * 255 # round image to 0-255
 
-                samples.append(Image.fromarray((output/self.sample_thickness).astype(np.uint8)))
+                samples.append(Image.fromarray((output.squeeze()/self.sample_thickness).astype(np.uint8)))
+
+            # # use mask:
+            # if self.num_channels == 1:
+            #     masks.append(self._parse_mask(record.path.rsplit('/', 1)[-1]), indices)
 
 
         elif self.input_format in set(['nifti', 'nii', 'nii.gz']):
@@ -178,13 +191,23 @@ class CTDataSet(data.Dataset):
 
         return record, samples
 
-    def _cal_mask(self):
+    def _parse_mask(self, filename, indices):
         '''
-        This function is used to calculate the mask of brain from the original 3d slices.
-        If it is fast enough, then this function can be used every time when load data. Otherwise,
-        the masks will be calculated once and stored in memory for each case.
+        This function is used to load the mask of brain from the original 3d slices.
+        The masks are pre-extracted by using a UNet
+
+        also needs to calculate different masks for subdural part and parenchymal part
         '''
-        pass
+
+        reader = sitk.ReadImage(os.path.join(self.maskpath, filename + '.nii.gz')) # directory is actually the file name of nii's
+        volume = sitk.GetArrayFromImage(reader)
+
+        for idx in indices:
+            imgs = volume[range(idx, idx + self.sample_thickness)]
+            samples.append(Image.fromarray(imgs.mean(axis=0).astype('float32')))
+
+        return samples
+
 
     def _parse_list(self):
         self.ct_list = list()

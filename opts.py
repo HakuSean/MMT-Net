@@ -7,8 +7,8 @@ def parse_opts():
     # ---------------------------------------------
     # -- Input and Output -------------------------
     # ---------------------------------------------
-    parser.add_argument('dataset', type=str, choices=['rsna', 'imed'],
-                        help='The subset of rsna or imed')
+    parser.add_argument('dataset', type=str, choices=['rsna', 'xnat'],
+                        help='The subset of rsna or xnat, xnat is imed')
     parser.add_argument('--split', type=str, default='0', 
                         help='The number of split of 5_fold')
     parser.add_argument('--annotation_path', type=str, default='./labels/hemorrhage_',
@@ -79,7 +79,7 @@ def parse_opts():
                         help='(resnet | preresnet | wideresnet | resnext | densenet | BNInception | svm')
     parser.add_argument('--model_depth', type=int, default=18,
                         help='Depth of resnet (10 | 18 | 34 | 50 | 101)')
-    parser.add_argument('--model_type', type=str, default='3d', choices=['3d', 'tsn', '2d'],
+    parser.add_argument('--model_type', type=str, default='3d', choices=['3d', 'tsn', '2d', 'part'],
                         help='Type of model. When 2d and tsn, model will use pretrained weights from ImageNet.')
     parser.add_argument('--resnet_shortcut', type=str, default='B',
                         help='Shortcut type of resnet (A | B)')
@@ -168,5 +168,10 @@ def parse_opts():
     else:
         args.n_classes = 7
         args.concern_label = 1
+
+    if args.model_type == 'part':
+        args.n_channels = 1
+    else:
+        args.n_channels = 3
 
     return args

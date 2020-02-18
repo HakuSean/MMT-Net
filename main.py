@@ -24,6 +24,7 @@ from epochs import train_epoch, val_epoch
 from opts import parse_opts
 from model3d import generate_3d
 from tsnmodel import generate_tsn
+from mmt import generate_mmt
 from spatial_transforms import *
 from temporal_transforms import *
 from utils import *
@@ -52,7 +53,7 @@ if __name__ == '__main__':
     outpath = os.path.join(args.result_path, args.dataset + '_split' + args.split + '_' + args.tag)
     if not os.path.exists(outpath):
         os.makedirs(outpath)
-    
+
     # set fusion_type. Default: no attention
     args.fusion_type = 'att' if args.attention_size else args.fusion_type
 
@@ -83,6 +84,8 @@ if __name__ == '__main__':
         model, parameters = generate_3d(args)
     elif args.model_type == 'tsn':
         model, parameters = generate_tsn(args)
+    elif args.model_type == 'part' :
+        model, parameters = generate_mmt(args)
     elif args.model_type == '2d':
         model = generate_2d(args)
     else:

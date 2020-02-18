@@ -281,11 +281,13 @@ class ToTorchTensor(object):
         # step 3: form 0-255 or 0-1
         # if norm == 1, means do nothing for normalization
         if not self.norm: # for dicom, each case specifically
-            img = img.float().div(255.0)
+            img = img.float().div(255.0) # 255 because using windows to cut images into around 255.
             # else:
             #     img = img.float().sub(img.min()).div(img.max() - img.min())
         elif not self.norm == 1.0: # for jpg, norm = 255
             img = img.float().div(self.norm)
+        else:
+            img = img.float()
 
         if self.caffe_pretrain:
             return img.mul(255.0)
@@ -295,10 +297,12 @@ class ToTorchTensor(object):
     def imgs2tensor(self, imgs):
         '''Transfer image to torch tensor, i.e. ToTensor
         '''
-        img = np.concatenate([np.expand_dims(x, 0) for x in imgs], axis=0) # N x 512 x 512 x 3
-        img = torch.from_numpy(img).permute(0, 3, 1, 2).contiguous() # N x 3 x 512 x512
-            # img = np.concatenate([np.expand_dims(x, 2) for x in imgs], axis=2) # 512 x 512 x N(image numbers)
-            # img = torch.from_numpy(img).permute(2, 0, 1).contiguous() # N x 512 x 512
+        if self.model_type == 'part':
+            img = np.concatenate([np.expand_dims(x, 2) for x in imgs], axis=2) # 512 x 512 x N(image numbers)
+            img = torch.from_numpy(img).permute(2, 0, 1).contiguous() # N x 512 x 512
+        else:
+            img = np.concatenate([np.expand_dims(x, 0) for x in imgs], axis=0) # N x 512 x 512 x 3
+            img = torch.from_numpy(img).permute(0, 3, 1, 2).contiguous() # N x 3 x 512 x512
 
         return img
 

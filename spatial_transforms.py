@@ -13,6 +13,35 @@ import torchvision
 from PIL import Image, ImageOps
 import cv2
 
+class MaskCompose(object):
+    """Composes several transforms together.
+
+    Args:
+        transforms (list of ``Transform`` objects): list of transforms to compose.
+
+    Example:
+        >>> transforms.Compose([
+        >>>     transforms.CenterCrop(10),
+        >>>     transforms.ToTensor(),
+        >>> ])
+    """
+
+    def __init__(self, transforms):
+        self.transforms = transforms
+
+    def __call__(self, img, mask):
+        for t in self.transforms:
+            img, mask = t(img, mask)
+        return img, mask
+
+    def __repr__(self):
+        format_string = self.__class__.__name__ + '('
+        for t in self.transforms:
+            format_string += '\n'
+            format_string += '    {0}'.format(t)
+        format_string += '\n)'
+        return format_string
+
 class GroupRandomBrightnessContrast(object):
     """Randomly change brightness and contrast of the input image.
     Args:
@@ -34,10 +63,13 @@ class GroupRandomBrightnessContrast(object):
         self.contrast_limit = contrast_limit
         self.prob = p
 
-    def __call__(self, img_group):
+    def __call__(self, img_group, mask_group=None):
         # sometimes do nothing
         if random.random() > self.prob:
-            return img_group
+            if mask_group is not None:
+                return img_group, mask_group
+            else:
+                return img_group
         else:
             alpha = 1.0 + random.uniform(-self.contrast_limit, self.contrast_limit)
             beta = 0.0 + random.uniform(-self.brightness_limit, self.brightness_limit)
@@ -59,7 +91,11 @@ class GroupRandomBrightnessContrast(object):
             for img in img_group:
                 out_images.append(Image.fromarray(cv2.LUT(np.array(img), lut)))
 
-            return out_images
+            # output
+            if mask_group is not None:
+                return out_images, mask_group
+            else:
+                return out_images
 
 # different from RandomCrop: use the same random number for the group
 class GroupRandomCrop(object):
@@ -69,24 +105,37 @@ class GroupRandomCrop(object):
         else:
             self.size = size
 
-    def __call__(self, img_group):
+    def __call__(self, img_group, mask_group=None):
 
         w, h = img_group[0].size
         th, tw = self.size
 
         out_images = list()
+        out_masks = list() 
 
         x1 = random.randint(0, w - tw)
         y1 = random.randint(0, h - th)
 
-        for img in img_group:
-            assert(img.size[0] == w and img.size[1] == h) # in case the image shapes dont match
-            if w == tw and h == th:
-                out_images.append(img)
-            else:
-                out_images.append(img.crop((x1, y1, x1 + tw, y1 + th)))
+        if mask_group is not None:
+            for img, mask in zip(img_group, mask_group):
+                assert(img.size[0] == w and img.size[1] == h) # in case the image shapes dont match
+                if w == tw and h == th:
+                    out_images.append(img)
+                    out_masks.append(mask)
+                else:
+                    out_images.append(img.crop((x1, y1, x1 + tw, y1 + th)))
+                    out_masks.append(maskmask.crop((x1, y1, x1 + tw, y1 + th)))
+            return out_images, out_masks
 
-        return out_images
+        else:
+            for img in img_group:
+                assert(img.size[0] == w and img.size[1] == h) # in case the image shapes dont match
+                if w == tw and h == th:
+                    out_images.append(img)
+                else:
+                    out_images.append(img.crop((x1, y1, x1 + tw, y1 + th)))
+
+            return out_images
 
 # different from RandomCrop: Including random resize function
 class GroupRandomResizedCrop(object):
@@ -99,7 +148,7 @@ class GroupRandomResizedCrop(object):
         self.ratio = ratio
         self.worker = torchvision.transforms.Resize((size, size))
 
-    def __call__(self, img_group):
+    def __call__(self, img_group, mask_group=None):
         """
         Args:
             img (PIL Image): Image to be cropped and resized.
@@ -108,12 +157,22 @@ class GroupRandomResizedCrop(object):
             PIL Image: Randomly cropped and resized image.
         """
         out_images = list()
+        out_masks = list()
 
         i, j, h, w = self.get_params(img_group[0], self.scale, self.ratio)
-        for img in img_group:
-            out_images.append(self.worker(img.crop((i, j, i + w, j + h))))
 
-        return out_images
+        if mask_group is not None:
+            for img, mask in zip(img_group, mask_group):
+                out_images.append(self.worker(img.crop((i, j, i + w, j + h))))
+                out_masks.append(self.worker(mask.crop((i, j, i + w, j + h))))
+
+            return out_images, out_masks
+
+        else:
+            for img in img_group:
+                out_images.append(self.worker(img.crop((i, j, i + w, j + h))))
+
+            return out_images
 
     @staticmethod
     def get_params(img, scale, ratio):
@@ -165,16 +224,22 @@ class GroupFiveCrop(object):
     def __init__(self, size):
         self.worker = torchvision.transforms.FiveCrop(size)
 
-    def __call__(self, img_group):
-        return [self.worker(img) for img in img_group]
+    def __call__(self, img_group, mask_group=None):
+        if mask_group is not None:
+            return [self.worker(img) for img in img_group], [self.worker(img) for img in mask_group]
+        else:
+            return [self.worker(img) for img in img_group]
 
 
 class GroupCenterCrop(object):
     def __init__(self, size):
         self.worker = torchvision.transforms.CenterCrop(size)
 
-    def __call__(self, img_group):
-        return [self.worker(img) for img in img_group]
+    def __call__(self, img_group, mask_group=None):
+        if mask_group is not None:
+            return [self.worker(img) for img in img_group], [self.worker(img) for img in mask_group]
+        else:
+            return [self.worker(img) for img in img_group]
 
 # different from RandomHorizentalFlip: flip for the whole group according to probability
 class GroupRandomHorizontalFlip(object):
@@ -185,16 +250,24 @@ class GroupRandomHorizontalFlip(object):
     def __init__(self, is_flow=False):
         self.is_flow = is_flow
 
-    def __call__(self, img_group, is_flow=False):
+    def __call__(self, img_group, mask_group=None, is_flow=False):
         v = random.random()
         if v < 0.5:
             ret = [img.transpose(Image.FLIP_LEFT_RIGHT) for img in img_group]
             if self.is_flow:
                 for i in range(0, len(ret), 2):
                     ret[i] = ImageOps.invert(ret[i])  # invert flow pixel values when flipping
-            return ret
+
+            if mask_group is not None:
+                mask_mirror = [mask.transpose(Image.FLIP_LEFT_RIGHT) for mask in mask_group]
+                return ret, mask_mirror
+            else:
+                return ret
         else:
-            return img_group
+            if mask_group is not None:
+                return img_group, mask_group
+            else:
+                return img_group
 
 # different from RandomRotation: rotate for the whole group according to probability
 class GroupRandomRotation(object):
@@ -217,18 +290,25 @@ class GroupRandomRotation(object):
 
         self.prob = p
 
-    def __call__(self, img_group):
+    def __call__(self, img_group, mask_group=None):
         """
             img (PIL Image): Image to be rotated.
         Returns:
             PIL Image: Rotated image.
         """
         if random.random() > self.prob:
-            return img_group
+            out_images = img_group
+            out_masks = mask_group
         else:
             angle = random.uniform(self.degrees[0], self.degrees[1])
+            out_images = [img.rotate(angle) for img in img_group]
+            if mask_group is not None:
+                out_masks = [img.rotate(angle) for img in mask_group]
 
-            return [img.rotate(angle) for img in img_group]
+        if mask_group is not None:
+            return out_images, out_masks
+        else:
+            return out_images
 
 # put images within one group into one numpy.ndarray
 class ToTorchTensor(object):
@@ -248,7 +328,7 @@ class ToTorchTensor(object):
         self.norm = norm
         self.caffe_pretrain = caffe_pretrain
 
-    def __call__(self, pic):
+    def __call__(self, pic, mask=None):
         """
         Args:
             pic (PIL.Image or numpy.ndarray): Image to be converted to tensor.
@@ -290,7 +370,10 @@ class ToTorchTensor(object):
             img = img.float()
 
         if self.caffe_pretrain:
-            return img.mul(255.0)
+            img =  img.mul(255.0)
+        
+        if mask is not None:
+            return img, self.imgs2tensor(mask)
         else:
             return img
 
@@ -319,7 +402,7 @@ class GroupNormalize(object):
             self.mean = self.mean.cuda()
             self.std = self.std.cuda()
 
-    def __call__(self, tensor):
+    def __call__(self, tensor, mask_tensor=None):
         # tensor.size()[0] is the real channel, len(self.mean) is the channel of one single picture.
         # For TSN, the division is the total slice number. For 3D, the division should always be one.
 
@@ -327,7 +410,10 @@ class GroupNormalize(object):
         for i in range(len(tensor)):
             new_tensor[i] += tensor[i].sub(self.mean).div(self.std)
 
-        return new_tensor
+        if mask_tensor is not None:
+            return new_tensor, mask_tensor
+        else:
+            return new_tensor
 
 # different from Resize: flip for the whole group according to probability
 class GroupResize(object):
@@ -348,7 +434,7 @@ class GroupResize(object):
         self.size = size
         self.interpolation = interpolation
 
-    def __call__(self, img_group):
+    def __call__(self, img_group, mask_group=None):
         """
         Args:
             img (PIL.Image): Image to be scaled.
@@ -360,407 +446,27 @@ class GroupResize(object):
             w, h = img_group[0].size
 
             if (w <= h and w == self.size) or (h <= w and h == self.size):
-                return img_group
+                if mask_group is not None:
+                    return img_group, mask_group
+                else:
+                    return img_group
+
             if w < h:
                 ow = self.size
                 oh = int(self.size * h / w)
-                return [img.resize((ow, oh), self.interpolation) for img in img_group]
             else:
                 oh = self.size
                 ow = int(self.size * w / h)
-                return [img.resize((ow, oh), self.interpolation) for img in img_group]
-        else:
-            return [img.resize(self.size, self.interpolation) for img in img_group]
 
-# ------------------------------------------------
-# --------- Deserted -----------------------------
-# ------------------------------------------------
+            out_images = [img.resize((ow, oh), self.interpolation) for img in img_group]
 
-class RandomHorizontalFlip(object):
-    """Horizontally flip the given PIL.Image randomly with a probability of 0.5."""
-
-    def __call__(self, img):
-        """
-        Args:
-            img (PIL.Image): Image to be flipped.
-        Returns:
-            PIL.Image: Randomly flipped image.
-        """
-        if self.p < 0.5:
-            return img.transpose(Image.FLIP_LEFT_RIGHT)
-        return img
-
-    def randomize_parameters(self):
-        self.p = random.random()
-
-
-class RandomRotation(object):
-    """Rotate the image by angle.
-    """
-
-    def __init__(self, degrees):
-        if isinstance(degrees, numbers.Number):
-            if degrees < 0:
-                raise ValueError("If degrees is a single number, it must be positive.")
-            self.degrees = (-degrees, degrees)
-        else:
-            if len(degrees) != 2:
-                raise ValueError("If degrees is a sequence, it must be of len 2.")
-            self.degrees = degrees
-
-    def __call__(self, img):
-        """
-            img (PIL Image): Image to be rotated.
-        Returns:
-            PIL Image: Rotated image.
-        """
-        return img.rotate(self.angle)
-        
-
-    def randomize_parameters(self):
-        self.angle = random.uniform(self.degrees[0], self.degrees[1])
-
-class Compose3D(object):
-    """Composes several transforms together.
-    Args:
-        transforms (list of ``Transform`` objects): list of transforms to compose.
-    Example:
-        >>> transforms.Compose([
-        >>>     transforms.CenterCrop(10),
-        >>>     transforms.ToTensor(),
-        >>> ])
-    """
-
-    def __init__(self, transforms):
-        self.transforms = transforms
-
-    def __call__(self, img):
-        for t in self.transforms:
-            img = t(img)
-        return img
-
-    def randomize_parameters(self):
-        for t in self.transforms:
-            try:
-                t.randomize_parameters()
-            except:
-                continue
-
-# class ToGroup(object)
-#     """ Transform from list(list(Image)) (comes from jpg)
-#     or numpy.array (comes from nii.gz) to list(Image)
-
-#     Size of numpy.array: S x N x H x W
-#     Size of list(list(Image)): S x N x Image
-#     S: number of segments, i.e. the input slice number
-#     N: number of thickness, needs to be averaged to one
-
-#     Operations:
-#         1. Average among different Image/numpy.array according to sample_thickness
-#         2. Transform numpy.array to PIL.Image
-#     Args:
-#         sample_thickness
-#         list(list(Image)) or numpy.array
-
-#     Output:
-#         list of Image. Each Image is PIL.Image.Image image mode=F size=512x512.
-#         Note that the mode here is F (for float), not L for grayscale or RGB, which are uint8
-#         This is because average is conducted.
-
-#     """
-#     def __init__(self, sample_thickness):
-#         self.sample_thickness = sample_thickness
-
-#     def __call__(self, data):
-#         assert len(data[0]) == self.sample_thickness, "sample thickness does not match."
-
-#         output = list()
-#         if isinstance(data, np.ndarray):
-#             for imgs in data:
-#                 avg = imgs.mean(axis=0)
-#                 output.append(Image.fromarray(avg.astype('float32')))
-
-#         elif isinstance(data, list):
-#             for imgs in data:
-#                 avg = 
-
-#         else:
-#             raise TypeError('Wrong data type.')
-
-
-
-
-class Normalize(object):
-    """Normalize an tensor image with mean and standard deviation.
-    Given mean: (R, G, B) and std: (R, G, B),
-    will normalize each channel of the torch.*Tensor, i.e.
-    channel = (channel - mean) / std
-    Args:
-        mean (sequence): Sequence of means for R, G, B channels respecitvely.
-        std (sequence): Sequence of standard deviations for R, G, B channels
-            respecitvely.
-    """
-
-    def __init__(self, mean, std):
-        self.mean = mean
-        self.std = std
-
-    def __call__(self, tensor):
-        """
-        Args:
-            tensor (Tensor): Tensor image of size (C, H, W) to be normalized.
-        Returns:
-            Tensor: Normalized image.
-        """
-        # TODO: make efficient
-        for t, m, s in zip(tensor, self.mean, self.std):
-            t.sub_(m).div_(s)
-        return tensor
-
-    def randomize_parameters(self):
-        pass
-
-
-class MultiScaleCornerCrop(object):
-    """Crop the given PIL.Image to randomly selected size.
-    A crop of size is selected from scales of the original size.
-    A position of cropping is randomly selected from 4 corners and 1 center.
-    This crop is finally resized to given size.
-    Args:
-        scales: cropping scales of the original size
-        size: size of the smaller edge
-        interpolation: Default: PIL.Image.BILINEAR
-    """
-
-    def __init__(self,
-                 scales,
-                 size,
-                 interpolation=Image.BILINEAR,
-                 crop_positions=['c', 'tl', 'tr', 'bl', 'br']):
-        self.scales = scales
-        self.size = size
-        self.interpolation = interpolation
-
-        self.crop_positions = crop_positions
-
-    def __call__(self, img):
-        min_length = min(img.size[0], img.size[1])
-        crop_size = int(min_length * self.scale)
-
-        image_width = img.size[0]
-        image_height = img.size[1]
-
-        if self.crop_position == 'c':
-            center_x = image_width // 2
-            center_y = image_height // 2
-            box_half = crop_size // 2
-            x1 = center_x - box_half
-            y1 = center_y - box_half
-            x2 = center_x + box_half
-            y2 = center_y + box_half
-        elif self.crop_position == 'tl':
-            x1 = 0
-            y1 = 0
-            x2 = crop_size
-            y2 = crop_size
-        elif self.crop_position == 'tr':
-            x1 = image_width - crop_size
-            y1 = 0
-            x2 = image_width
-            y2 = crop_size
-        elif self.crop_position == 'bl':
-            x1 = 0
-            y1 = image_height - crop_size
-            x2 = crop_size
-            y2 = image_height
-        elif self.crop_position == 'br':
-            x1 = image_width - crop_size
-            y1 = image_height - crop_size
-            x2 = image_width
-            y2 = image_height
-
-        img = img.crop((x1, y1, x2, y2))
-
-        return img.resize((self.size, self.size), self.interpolation)
-
-    def randomize_parameters(self):
-        self.scale = self.scales[random.randint(0, len(self.scales) - 1)]
-        self.crop_position = self.crop_positions[random.randint(
-            0,
-            len(self.crop_positions) - 1)]
-
-
-class MultiScaleRandomCrop(object):
-
-    def __init__(self, scales, size, interpolation=Image.BILINEAR):
-        self.scales = scales
-        self.size = size
-        self.interpolation = interpolation
-
-    def __call__(self, img):
-        min_length = min(img.size[0], img.size[1])
-        crop_size = int(min_length * self.scale)
-
-        image_width = img.size[0]
-        image_height = img.size[1]
-
-        x1 = self.tl_x * (image_width - crop_size)
-        y1 = self.tl_y * (image_height - crop_size)
-        x2 = x1 + crop_size
-        y2 = y1 + crop_size
-
-        img = img.crop((x1, y1, x2, y2))
-
-        return img.resize((self.size, self.size), self.interpolation)
-
-    def randomize_parameters(self):
-        self.scale = self.scales[random.randint(0, len(self.scales) - 1)]
-        self.tl_x = random.random()
-        self.tl_y = random.random()
-
-
-class LoadNifty(object):
-    """ Transform from file name to data.
-    """
-
-    def __init__(self, fields):
-        self.fields = fields if isinstance(fields, list) else [
-         fields]
-
-    def load_data(self, v, type='float32'):
-        import nibabel as nib
-        if isinstance(v, (bytes, bytearray)):
-            v = v.decode('UTF-8')
-        epi_img = nib.load(v)
-        if not epi_img is not None:
-            raise AssertionError
-        img_array = epi_img.get_fdata(dtype=type)
-        return img_array
-
-    def __call__(self, data):
-        for field in self.fields:
-            v = data[field]
-            channel_axis = 0
-            if isinstance(v, (bytes, bytearray)):
-                v = v.decode('UTF-8')
-            img_array = 0
-            if isinstance(v, str):
-                img_array = self.load_data(v)
-                if len(img_array.shape) < 4:
-                    img_array = np.expand_dims(img_array, axis=channel_axis)
-                else:
-                    if len(img_array.shape) >= 4:
-                        img_array = np.transpose(np.squeeze(img_array), (3, 0, 1, 2))
+            if mask_group is not None:
+                return out_images, [img.resize((ow, oh), self.interpolation) for img in mask_group]
             else:
-                if isinstance(v, (list, np.ndarray)):
-                    img_array = []
-                    for one_v in v:
-                        if isinstance(one_v, (bytes, bytearray)):
-                            one_v = one_v.decode('UTF-8')
-                        img_array.append(self.load_data(one_v))
-
-                    img_array = np.stack(img_array, axis=channel_axis)
-                else:
-                    raise ValueError('Incorrect format, data field should be str or list')
-            data[field] = img_array
-
-        return data
-
-class CenterCrop(object):
-    """Crops the given PIL.Image at the center.
-    Args:
-        size (sequence or int): Desired output size of the crop. If size is an
-            int instead of sequence like (h, w), a square crop (size, size) is
-            made.
-    """
-
-    def __init__(self, size):
-        if isinstance(size, numbers.Number):
-            self.size = (int(size), int(size))
+                return out_images
         else:
-            self.size = size
-
-    def __call__(self, img):
-        """
-        Args:
-            img (PIL.Image): Image to be cropped.
-        Returns:
-            PIL.Image: Cropped image.
-        """
-        w, h = img.size
-        th, tw = self.size
-        x1 = int(round((w - tw) / 2.))
-        y1 = int(round((h - th) / 2.))
-        return img.crop((x1, y1, x1 + tw, y1 + th))
-
-    def randomize_parameters(self):
-        pass
-
-
-class CornerCrop(object):
-
-    def __init__(self, size, crop_position=None):
-        self.size = size
-        if crop_position is None:
-            self.randomize = True
-        else:
-            self.randomize = False
-        self.crop_position = crop_position
-        self.crop_positions = ['c', 'tl', 'tr', 'bl', 'br']
-
-    def __call__(self, img):
-        image_width = img.size[0]
-        image_height = img.size[1]
-
-        if self.crop_position == 'c':
-            th, tw = (self.size, self.size)
-            x1 = int(round((image_width - tw) / 2.))
-            y1 = int(round((image_height - th) / 2.))
-            x2 = x1 + tw
-            y2 = y1 + th
-        elif self.crop_position == 'tl':
-            x1 = 0
-            y1 = 0
-            x2 = self.size
-            y2 = self.size
-        elif self.crop_position == 'tr':
-            x1 = image_width - self.size
-            y1 = 0
-            x2 = image_width
-            y2 = self.size
-        elif self.crop_position == 'bl':
-            x1 = 0
-            y1 = image_height - self.size
-            x2 = self.size
-            y2 = image_height
-        elif self.crop_position == 'br':
-            x1 = image_width - self.size
-            y1 = image_height - self.size
-            x2 = image_width
-            y2 = image_height
-
-        img = img.crop((x1, y1, x2, y2))
-
-        return img
-
-    def randomize_parameters(self):
-        if self.randomize:
-            self.crop_position = self.crop_positions[random.randint(
-                0,
-                len(self.crop_positions) - 1)]
-
-
-class Stack(object):
-
-    def __init__(self, roll=False):
-        self.roll = roll
-
-    def __call__(self, img_group):
-        if img_group[0].mode == 'L':
-            return np.concatenate([np.expand_dims(x, 2) for x in img_group], axis=2)
-        elif img_group[0].mode == 'RGB':
-            if self.roll:
-                return np.concatenate([np.array(x)[:, :, ::-1] for x in img_group], axis=2)
+            out_images = [img.resize(self.size, self.interpolation) for img in img_group]
+            if mask_group is not None:
+                return out_images, [img.resize(self.size, self.interpolation) for img in mask_group]
             else:
-                return np.concatenate(img_group, axis=2)
-
+                return out_images

@@ -153,7 +153,12 @@ if __name__ == '__main__':
         crop_method = GroupCenterCrop(args.sample_size)
 
     # define spatial and temporal transform
-    spatial_transform = transforms.Compose([
+    if args.model_type == 'part':
+        compose = MaskCompose
+    else:
+        compose = transforms.Compose
+
+    spatial_transform = compose([
         # GroupResize(args.sample_size if 'inception' in args.model and args.sample_size >= 300 else 512),
         crop_method,
         GroupRandomRotation(30, p=0.5),

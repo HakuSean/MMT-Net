@@ -143,6 +143,7 @@ class CTDataSet(data.Dataset):
             # select dicom slices from original folder
             indices = self.temporal_transform(record)
 
+            # for each selected slice: consider multiple adjacent slices
             for slice_idx in indices:
                 reader.SetFileNames(dicom_names[slice_idx:slice_idx + self.sample_thickness])
                 try:
@@ -169,10 +170,9 @@ class CTDataSet(data.Dataset):
 
                 samples.append(Image.fromarray((output.squeeze()/self.sample_thickness).astype(np.uint8)))
 
-            # # use mask:
-            # if self.num_channels == 1:
-            #     masks.append(self._parse_mask(record.path.rsplit('/', 1)[-1]), indices)
-
+            # use mask:
+            if self.num_channels == 1:
+                masks = self._parse_mask(record.path.rsplit('/', 1)[-1], indices)
 
         elif self.input_format in set(['nifti', 'nii', 'nii.gz']):
             reader = sitk.ReadImage(directory + '.' + self.input_format) # directory is actually the file name of nii's
@@ -189,7 +189,10 @@ class CTDataSet(data.Dataset):
                 imgs = volume[range(idx, idx + self.sample_thickness)]
                 samples.append(Image.fromarray(imgs.mean(axis=0).astype('float32')))
 
-        return record, samples
+        if self.num_channels == 1:
+            return record, samples, masks
+        else:
+            return record, samples
 
     def _parse_mask(self, filename, indices):
         '''
@@ -198,15 +201,19 @@ class CTDataSet(data.Dataset):
 
         also needs to calculate different masks for subdural part and parenchymal part
         '''
+        masks = list()
 
         reader = sitk.ReadImage(os.path.join(self.maskpath, filename + '.nii.gz')) # directory is actually the file name of nii's
         volume = sitk.GetArrayFromImage(reader)
 
         for idx in indices:
-            imgs = volume[range(idx, idx + self.sample_thickness)]
-            samples.append(Image.fromarray(imgs.mean(axis=0).astype('float32')))
+            # readin idx of original mask
+            imgs = volume[range(idx, idx + self.sample_thickness)] # the volume should include either 0 or 1
 
-        return samples
+            # mask should be average among the adjacent slices
+            masks.append(Image.fromarray(imgs.mean(axis=0).astype('float32')))
+
+        return masks
 
 
     def _parse_list(self):
@@ -262,12 +269,19 @@ class CTDataSet(data.Dataset):
     def __getitem__(self, index):
         record = self.ct_list[index]
 
-        if record.num_slices == -1: # update record for the first time input
+        if self.num_channels == 1 and record.num_slices == -1:
+            self.ct_list[index], images, masks = self._load_images(record) # update record for the first time input
+        elif self.num_channels == 1:
+            _, images, masks = self._load_images(record)
+        elif record.num_slices == -1:
             self.ct_list[index], images = self._load_images(record)
         else:
             _, images = self._load_images(record)
 
-        return self.spatial_transform(images), torch.tensor(record.label, dtype=self.dtype), record.path.rsplit('/', 1)[-1]
+        if self.num_channels == 1:
+            return self.spatial_transform(images, masks), torch.tensor(record.label, dtype=self.dtype), record.path.rsplit('/', 1)[-1]
+        else:
+            return self.spatial_transform(images), torch.tensor(record.label, dtype=self.dtype), record.path.rsplit('/', 1)[-1]
 
 
     def __len__(self):

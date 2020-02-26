@@ -273,7 +273,7 @@ class SENet(nn.Module):
 
     def __init__(self, block, layers, groups, reduction, dropout_p=0.2,
                  inplanes=128, input_3x3=True, downsample_kernel_size=3,
-                 downsample_padding=1, num_classes=1000):
+                 downsample_padding=1, num_classes=1000, use_logits=True):
         """
         Parameters
         ----------
@@ -388,6 +388,7 @@ class SENet(nn.Module):
         self.avg_pool = nn.AvgPool2d(7, stride=1)
         self.dropout = nn.Dropout(dropout_p) if dropout_p is not None else None
         self.last_linear = nn.Linear(512 * block.expansion, num_classes)
+        self.use_logits = use_logits
 
     def _make_layer(self, block, planes, blocks, groups, reduction, stride=1,
                     downsample_kernel_size=1, downsample_padding=0):
@@ -427,7 +428,8 @@ class SENet(nn.Module):
 
     def forward(self, x):
         x = self.features(x)
-        x = self.logits(x)
+        if self.use_logits:
+            x = self.logits(x)
         return x
 
 
@@ -490,11 +492,11 @@ def se_resnet152(num_classes=1000, pretrained='imagenet'):
     return model
 
 
-def se_resnext50_32x4d(num_classes=1000, pretrained='imagenet'):
+def se_resnext50_32x4d(num_classes=1000, pretrained='imagenet', use_logits=True):
     model = SENet(SEResNeXtBottleneck, [3, 4, 6, 3], groups=32, reduction=16,
                   dropout_p=None, inplanes=64, input_3x3=False,
                   downsample_kernel_size=1, downsample_padding=0,
-                  num_classes=num_classes)
+                  num_classes=num_classes, use_logits=use_logits)
     if pretrained == 'imagenet':
         print('Load imagenet pretrained weights')
         settings = pretrained_settings['se_resnext50_32x4d']['imagenet']

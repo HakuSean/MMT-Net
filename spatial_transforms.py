@@ -380,7 +380,7 @@ class ToTorchTensor(object):
     def imgs2tensor(self, imgs):
         '''Transfer image to torch tensor, i.e. ToTensor
         '''
-        if self.model_type == 'part':
+        if self.model_type == 'mmt':
             img = np.concatenate([np.expand_dims(x, 2) for x in imgs], axis=2) # 512 x 512 x N(image numbers)
             img = torch.from_numpy(img).permute(2, 0, 1).contiguous() # N x 512 x 512
         else:
@@ -411,7 +411,7 @@ class GroupNormalize(object):
             new_tensor[i] += tensor[i].sub(self.mean).div(self.std)
 
         if mask_tensor is not None:
-            return new_tensor, mask_tensor
+            return new_tensor, mask_tensor.sub_(0.5).div_(0.25)
         else:
             return new_tensor
 
@@ -451,7 +451,7 @@ class GroupResize(object):
                 else:
                     return img_group
 
-            if w < h:
+            if h < w:
                 ow = self.size
                 oh = int(self.size * h / w)
             else:

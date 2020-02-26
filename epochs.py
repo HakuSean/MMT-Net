@@ -26,22 +26,26 @@ def train_epoch(epoch, data_loader, model, criterion, optimizer, opt, logger):
         else:
             model.module.partialBN(True)
 
+    end_time = time.time()
     model.train()
 
-    end_time = time.time()
     for iteration, (inputs, targets, _) in enumerate(data_loader):
         data_time.update(time.time() - end_time)
 
         if torch.cuda.is_available():
             targets = targets.cuda()
-            inputs = inputs.cuda()
-
-        outputs = model(inputs)
+            if opt.model_type == 'mmt':
+                masks = inputs[1].cuda()
+                inputs = inputs[0].cuda()
+                outputs = model(inputs, masks)
+            else:
+                inputs = inputs.cuda()
+                outputs = model(inputs)
 
         loss = criterion(outputs, targets)       
 
         # update with hard examples when learning rate is small
-        if epoch > opt.n_epochs * 0.5 - 1:
+        if epoch > 100: #opt.n_epochs * 0.5 - 1:
             large_loss = F.threshold(loss.mean(axis=1), 0.8, 0., inplace=True)
             small_loss = F.threshold(loss.mean(axis=1), 0.2, 0., inplace=True)
             if (large_loss > 0).any():
@@ -108,15 +112,22 @@ def val_epoch(epoch, data_loader, model, criterion, opt, logger):
 
     all_outputs = list()
     all_targets = list()
-
+    
     with torch.no_grad():
         for i, (inputs, targets, _) in enumerate(data_loader):
             data_time.update(time.time() - end_time)
 
             if torch.cuda.is_available():
-                inputs, targets = inputs.cuda(), targets.cuda()
+                targets = targets.cuda()
+                if opt.model_type == 'mmt':
+                    masks = inputs[1].cuda()
+                    inputs = inputs[0].cuda()
+                    outputs = model(inputs, masks)
+                else:
+                    inputs = inputs.cuda()
+                    outputs = model(inputs)
 
-            outputs = model(inputs.view((-1,) + inputs.shape[-4:]))
+            # outputs = model(inputs.view((-1,) + inputs.shape[-4:]))
             outputs = outputs.view(len(targets), -1, outputs.shape[-1]).mean(dim=1)  # max(dim=1)[0] or mean(dim=1)
 
             all_outputs.extend(outputs.cpu().numpy())

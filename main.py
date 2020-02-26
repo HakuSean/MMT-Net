@@ -84,7 +84,7 @@ if __name__ == '__main__':
         model, parameters = generate_3d(args)
     elif args.model_type == 'tsn':
         model, parameters = generate_tsn(args)
-    elif args.model_type == 'part' :
+    elif args.model_type == 'mmt' :
         model, parameters = generate_mmt(args)
     elif args.model_type == '2d':
         model = generate_2d(args)
@@ -153,7 +153,7 @@ if __name__ == '__main__':
         crop_method = GroupCenterCrop(args.sample_size)
 
     # define spatial and temporal transform
-    if args.model_type == 'part':
+    if args.model_type == 'mmt':
         compose = MaskCompose
     else:
         compose = transforms.Compose

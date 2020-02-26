@@ -11,8 +11,8 @@ from torch.nn.init import normal_, constant_
 import models_2d
 
 def generate_mmt(args):
-    base_name = 'p' + args.arch.replace('-', '')
-    model = CTSN(args.n_classes, args.n_slices, 
+    base_name = args.arch.replace('-', '')
+    model = CMMT(args.n_classes, args.n_slices,
                 base_model=base_name, 
                 channels=args.n_channels, 
                 fusion_type=args.fusion_type, dropout=args.dropout, 
@@ -31,8 +31,8 @@ def generate_mmt(args):
     # print only in training
     if args.pretrain_path:
         print(("""
-Initializing CTSN with base model: {}.
-CTSN Configurations:
+Initializing CMMT with base model: {}.
+CMMT Configurations:
     num_segments:       {}
     channels:           {}
     crop_size:          {}
@@ -43,13 +43,13 @@ CTSN Configurations:
 
     return model, policies
 
-class CTSN(nn.Module):
+class CMMT(nn.Module):
     def __init__(self, num_class, num_segments,
                  base_model='resnet101', channels=1,
                  fusion_type='avg', before_softmax=True,
                  dropout=0.8, pretrained=True,
                  partial_bn=True, attention_size=0, use_se=False):
-        super(CTSN, self).__init__()
+        super(CMMT, self).__init__()
         self.channels = channels
         self.num_segments = num_segments
         self.before_softmax = before_softmax
@@ -71,11 +71,11 @@ class CTSN(nn.Module):
         self.consensus = fusion_type
         self.attention_size = attention_size
 
-        feature_dim = self._prepare_ctsn(num_class) # initialize the last layer
+        feature_dim = self._prepare_cmmt(num_class) # initialize the last layer
 
-        print("Converting the ImageNet model to a CTSN init model")
+        print("Converting the ImageNet model to a CMMT init model")
         self.base_model = self._construct_ct_model(self.base_model)
-        print("Done. CTSN model ready...")
+        print("Done. CMMT model ready...")
 
         # special operations
         self.softmax = nn.Softmax(dim=1)
@@ -84,7 +84,7 @@ class CTSN(nn.Module):
         if partial_bn:
             self.partialBN(True)
 
-    def _prepare_ctsn(self, num_class):
+    def _prepare_cmmt(self, num_class):
         feature_dim = getattr(self.base_model, self.base_model.last_layer_name).in_features
         std = 0.001
 
@@ -127,7 +127,7 @@ class CTSN(nn.Module):
             self.input_std = [0.226]
 
         elif 'resnext' in base_model or base_model == 'bninception':
-            self.base_model = getattr(models_2d, base_model)(pretrained=self.pretrained)
+            self.base_model = getattr(models_2d, base_model)(pretrained=self.pretrained, use_logits=False)
             self.base_model.last_layer_name = 'last_linear'
             self.input_size = getattr(self.base_model, 'input_size', [3, 224, 224])[-1]
             self.input_mean = getattr(self.base_model, 'mean', [0.485, 0.456, 0.406])
@@ -150,7 +150,7 @@ class CTSN(nn.Module):
         Override the default train() to freeze the BN parameters
         :return:
         """
-        super(CTSN, self).train(mode)
+        super(CMMT, self).train(mode)
         count = 0
         if self._enable_pbn:
             print("Freezing BatchNorm2D except the first one.")
@@ -233,10 +233,23 @@ class CTSN(nn.Module):
         #      'name': "BN scale/shift"},
         # ]
 
-    def forward(self, input):
+    def forward(self, input, masks=None):
         # sample_len = 2 * self.new_length # here 2 means flow_x and flow_y, 3 for RGB
 
+        if masks is not None:
+            # model.eval to extract features from masks
+            self.base_model.eval()
+            with torch.no_grad():
+                mask_out = self.base_model(masks.view((-1, self.channels) + masks.size()[-2:]))
+            # model.train to train the model
+            self.base_model.train()
+
         base_out = self.base_model(input.view((-1, self.channels) + input.size()[-2:]))
+
+        if masks is not None:
+            base_out = base_out*((mask_out>0).to(torch.float32).cuda())
+
+        base_out = self.base_model.logits(base_out)
 
         if self.consensus == 'att':
             base_out = self.attention_net(base_out)

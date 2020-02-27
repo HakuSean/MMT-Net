@@ -42,6 +42,7 @@ class MaskCompose(object):
         format_string += '\n)'
         return format_string
 
+
 class GroupRandomBrightnessContrast(object):
     """Randomly change brightness and contrast of the input image.
     Args:
@@ -373,14 +374,14 @@ class ToTorchTensor(object):
             img =  img.mul(255.0)
         
         if mask is not None:
-            return img, self.imgs2tensor(mask)
+            return img, self.imgs2tensor(mask, is_mask=True)
         else:
             return img
 
-    def imgs2tensor(self, imgs):
+    def imgs2tensor(self, imgs, is_mask=False):
         '''Transfer image to torch tensor, i.e. ToTensor
         '''
-        if self.model_type == 'mmt':
+        if is_mask:
             img = np.concatenate([np.expand_dims(x, 2) for x in imgs], axis=2) # 512 x 512 x N(image numbers)
             img = torch.from_numpy(img).permute(2, 0, 1).contiguous() # N x 512 x 512
         else:

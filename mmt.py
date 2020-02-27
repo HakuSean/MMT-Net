@@ -73,8 +73,8 @@ class CMMT(nn.Module):
 
         feature_dim = self._prepare_cmmt(num_class) # initialize the last layer
 
-        print("Converting the ImageNet model to a CMMT init model")
-        self.base_model = self._construct_ct_model(self.base_model)
+        # print("Converting the ImageNet model to a CMMT init model")
+        # self.base_model = self._construct_ct_model(self.base_model)
         print("Done. CMMT model ready...")
 
         # special operations
@@ -240,14 +240,18 @@ class CMMT(nn.Module):
             # model.eval to extract features from masks
             self.base_model.eval()
             with torch.no_grad():
-                mask_out = self.base_model(masks.view((-1, self.channels) + masks.size()[-2:]))
+                mask_out = self.base_model(masks.view((-1, 1) + masks.size()[-2:]).repeat(1, 3, 1, 1))
             # model.train to train the model
             self.base_model.train()
 
         base_out = self.base_model(input.view((-1, self.channels) + input.size()[-2:]))
 
         if masks is not None:
-            base_out = base_out*((mask_out>0).to(torch.float32).cuda())
+            base_out = base_out*mask_out # i.e. mmt_debug
+            # base_out = base_out*torch.sigmoid(mask_out) # i.e. mmt_logits
+            # base_out = base_out*torch.clamp(mask_out, 0, 3) # i.e. mmt_clamp
+            # base_out = base_out*((mask_out>0).to(torch.float32).cuda()) # i.e. mmt_01
+
 
         base_out = self.base_model.logits(base_out)
 
@@ -288,32 +292,32 @@ class CMMT(nn.Module):
     #     return attn_output
 
 
-    def _construct_ct_model(self, base_model):
-        # modify the convolution layers
-        # Torch models are usually defined in a hierarchical way.
-        # nn.modules.children() return all sub modules in a DFS manner
-        modules = list(self.base_model.modules())
-        first_conv_idx = list(filter(lambda x: isinstance(modules[x], nn.Conv2d), list(range(len(modules)))))[0]
-        conv_layer = modules[first_conv_idx]
-        container = modules[first_conv_idx - 1]
+    # def _construct_ct_model(self, base_model):
+    #     # modify the convolution layers
+    #     # Torch models are usually defined in a hierarchical way.
+    #     # nn.modules.children() return all sub modules in a DFS manner
+    #     modules = list(self.base_model.modules())
+    #     first_conv_idx = list(filter(lambda x: isinstance(modules[x], nn.Conv2d), list(range(len(modules)))))[0]
+    #     conv_layer = modules[first_conv_idx]
+    #     container = modules[first_conv_idx - 1]
 
-        # modify parameters, assume the first blob contains the convolution kernels
-        params = [x.clone() for x in conv_layer.parameters()] # len=1 when there is no bias, otherwise the length should be 2.
-        kernel_size = params[0].size()
-        new_kernel_size = kernel_size[:1] + (1 * self.channels, ) + kernel_size[2:] # add amone different lists, in that case, kernel_size[0] and kernel_size[2:] are kept unchanged. Only change kernel_size[1]
-        new_kernels = params[0].data.mean(dim=1, keepdim=True).expand(new_kernel_size).contiguous()
+    #     # modify parameters, assume the first blob contains the convolution kernels
+    #     params = [x.clone() for x in conv_layer.parameters()] # len=1 when there is no bias, otherwise the length should be 2.
+    #     kernel_size = params[0].size()
+    #     new_kernel_size = kernel_size[:1] + (1 * self.channels, ) + kernel_size[2:] # add amone different lists, in that case, kernel_size[0] and kernel_size[2:] are kept unchanged. Only change kernel_size[1]
+    #     new_kernels = params[0].data.mean(dim=1, keepdim=True).expand(new_kernel_size).contiguous()
 
-        new_conv = nn.Conv2d(1 * self.channels, conv_layer.out_channels,
-                             conv_layer.kernel_size, conv_layer.stride, conv_layer.padding,
-                             bias=True if len(params) == 2 else False)
-        new_conv.weight.data = new_kernels
-        if len(params) == 2:
-            new_conv.bias.data = params[1].data # add bias if neccessary
-        layer_name = list(container.state_dict().keys())[0][:-7] # remove .weight suffix to get the layer name
+    #     new_conv = nn.Conv2d(1 * self.channels, conv_layer.out_channels,
+    #                          conv_layer.kernel_size, conv_layer.stride, conv_layer.padding,
+    #                          bias=True if len(params) == 2 else False)
+    #     new_conv.weight.data = new_kernels
+    #     if len(params) == 2:
+    #         new_conv.bias.data = params[1].data # add bias if neccessary
+    #     layer_name = list(container.state_dict().keys())[0][:-7] # remove .weight suffix to get the layer name
 
-        # replace the first convlution layer
-        setattr(container, layer_name, new_conv)
-        return base_model
+    #     # replace the first convlution layer
+    #     setattr(container, layer_name, new_conv)
+    #     return base_model
 
     @property
     def crop_size(self):

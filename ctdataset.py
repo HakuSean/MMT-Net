@@ -8,6 +8,7 @@ import random
 import torch
 
 import SimpleITK as sitk
+import cv2
 
 class CTRecord(object):
     '''
@@ -82,7 +83,7 @@ class CTDataSet(data.Dataset):
 
         # add inputs for PartialCNN
         self.maskpath = '/raid/snac/crc/{}/masks'.format(opts.dataset)
-        self.num_channels = opts.n_channels
+        self.model_type = opts.model_type
 
         if os.path.isfile(list_file):
             self._parse_list()
@@ -154,12 +155,8 @@ class CTDataSet(data.Dataset):
                 
                 _, h, w = imgs.shape
 
-                if self.num_channels == 3:
-                    windows = [(50, 80), (40, 200), (60, 360)] # blood, brain, tissue
-                    output = np.zeros((h, w, 3)) 
-                else:
-                    windows = [(122.5, 255)] # maximum for tissue part
-                    output = np.zeros((h, w, 1))
+                windows = [(50, 80), (40, 200), (60, 360)] # blood, brain, tissue
+                output = np.zeros((h, w, 3)) 
 
                 for frame in imgs:                    
                     for win_idx, win in enumerate(windows):
@@ -171,7 +168,7 @@ class CTDataSet(data.Dataset):
                 samples.append(Image.fromarray((output.squeeze()/self.sample_thickness).astype(np.uint8)))
 
             # use mask:
-            if self.num_channels == 1:
+            if self.model_type == 'mmt':
                 masks = self._parse_mask(record.path.rsplit('/', 1)[-1], indices)
 
         elif self.input_format in set(['nifti', 'nii', 'nii.gz']):
@@ -189,7 +186,7 @@ class CTDataSet(data.Dataset):
                 imgs = volume[range(idx, idx + self.sample_thickness)]
                 samples.append(Image.fromarray(imgs.mean(axis=0).astype('float32')))
 
-        if self.num_channels == 1:
+        if self.model_type == 'mmt':
             return record, samples, masks
         else:
             return record, samples
@@ -269,16 +266,16 @@ class CTDataSet(data.Dataset):
     def __getitem__(self, index):
         record = self.ct_list[index]
 
-        if self.num_channels == 1 and record.num_slices == -1:
+        if self.model_type == 'mmt' and record.num_slices == -1:
             self.ct_list[index], images, masks = self._load_images(record) # update record for the first time input
-        elif self.num_channels == 1:
+        elif self.model_type == 'mmt':
             _, images, masks = self._load_images(record)
         elif record.num_slices == -1:
             self.ct_list[index], images = self._load_images(record)
         else:
             _, images = self._load_images(record)
 
-        if self.num_channels == 1:
+        if self.model_type == 'mmt':
             return self.spatial_transform(images, masks), torch.tensor(record.label, dtype=self.dtype), record.path.rsplit('/', 1)[-1]
         else:
             return self.spatial_transform(images), torch.tensor(record.label, dtype=self.dtype), record.path.rsplit('/', 1)[-1]

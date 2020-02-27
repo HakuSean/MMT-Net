@@ -169,9 +169,4 @@ def parse_opts():
         args.n_classes = 7
         args.concern_label = 1
 
-    if args.model_type == 'mmt':
-        args.n_channels = 1
-    else:
-        args.n_channels = 3
-
     return args

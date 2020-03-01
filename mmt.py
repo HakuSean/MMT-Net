@@ -86,15 +86,16 @@ class CMMT(nn.Module):
 
     def _prepare_cmmt(self, num_class):
         feature_dim = getattr(self.base_model, self.base_model.last_layer_name).in_features
-        std = 0.001
+        std_linear = 0.001
+        std_conv = 0.01
 
         # initialize FC for attention
         if self.consensus == 'att':
             self.feat2att = nn.Linear(feature_dim, self.attention_size)
             self.alpha_net = nn.Linear(self.attention_size, 1)
-            normal_(self.feat2att.weight, 0, std)
+            normal_(self.feat2att.weight, 0, std_linear)
             constant_(self.feat2att.bias, 0)
-            normal_(self.alpha_net.weight, 0, std)
+            normal_(self.alpha_net.weight, 0, std_linear)
             constant_(self.alpha_net.bias, 0)
 
         # update avg_pool between layer4 and last_linear 
@@ -104,19 +105,19 @@ class CMMT(nn.Module):
         self.last_linear_1 = nn.Linear(128, 2)
         self.last_linear_2 = nn.Linear(128, 2)
         self.last_linear_0 = nn.Linear(128, 2)
-        normal_(self.last_linear_1.weight, 0, std)
+        normal_(self.last_linear_1.weight, 0, std_linear)
         constant_(self.last_linear_1.bias, 0)
-        normal_(self.last_linear_2.weight, 0, std)
+        normal_(self.last_linear_2.weight, 0, std_linear)
         constant_(self.last_linear_2.bias, 0)
-        normal_(self.last_linear_0.weight, 0, std)
+        normal_(self.last_linear_0.weight, 0, std_linear)
         constant_(self.last_linear_0.bias, 0)
 
         # add a conv1x1 layer to 
         self.branch_conv1 = nn.Conv2d(2048, 128, kernel_size=1, padding=0, bias=True)
         self.branch_conv2 = nn.Conv2d(2048, 128, kernel_size=1, padding=0, bias=True)
-        normal_(self.branch_conv1.weight, 0, std)
+        normal_(self.branch_conv1.weight, 0, std_conv)
         constant_(self.branch_conv1.bias, 0)
-        normal_(self.branch_conv2.weight, 0, std)
+        normal_(self.branch_conv2.weight, 0, std_conv)
         constant_(self.branch_conv2.bias, 0)
 
         return feature_dim

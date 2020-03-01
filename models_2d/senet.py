@@ -273,7 +273,7 @@ class SENet(nn.Module):
 
     def __init__(self, block, layers, groups, reduction, dropout_p=0.2,
                  inplanes=128, input_3x3=True, downsample_kernel_size=3,
-                 downsample_padding=1, num_classes=1000, use_logits=True):
+                 downsample_padding=1, num_classes=1000, use_branch=True):
         """
         Parameters
         ----------
@@ -383,15 +383,29 @@ class SENet(nn.Module):
             groups=groups,
             reduction=reduction,
             downsample_kernel_size=downsample_kernel_size,
-            downsample_padding=downsample_padding
+            downsample_padding=downsample_padding,
+            duplicate=use_branch
         )
+
+        # when use branch, define a duplicate of layer4 for an extra branch
+        if use_branch:
+            self.layer5 = self._make_layer(
+                block,
+                planes=512,
+                blocks=layers[3],
+                stride=2,
+                groups=groups,
+                reduction=reduction,
+                downsample_kernel_size=downsample_kernel_size,
+                downsample_padding=downsample_padding
+            )
         self.avg_pool = nn.AvgPool2d(7, stride=1)
         self.dropout = nn.Dropout(dropout_p) if dropout_p is not None else None
         self.last_linear = nn.Linear(512 * block.expansion, num_classes)
-        self.use_logits = use_logits
+        self.use_branch = use_branch
 
     def _make_layer(self, block, planes, blocks, groups, reduction, stride=1,
-                    downsample_kernel_size=1, downsample_padding=0):
+                    downsample_kernel_size=1, downsample_padding=0, duplicate=False):
         downsample = None
         if stride != 1 or self.inplanes != planes * block.expansion:
             downsample = nn.Sequential(
@@ -404,9 +418,16 @@ class SENet(nn.Module):
         layers = []
         layers.append(block(self.inplanes, planes, groups, reduction, stride,
                             downsample))
+
+        if duplicate:
+            pre_inplanes = self.inplanes
+
         self.inplanes = planes * block.expansion
         for i in range(1, blocks):
             layers.append(block(self.inplanes, planes, groups, reduction))
+
+        if duplicate:
+            self.inplanes = pre_inplanes
 
         return nn.Sequential(*layers)
 
@@ -415,7 +436,16 @@ class SENet(nn.Module):
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
-        x = self.layer4(x)
+        return x
+
+    def branches(self, x):
+        if self.use_branch:
+            x1 = self.layer4(x)
+            x2 = self.layer5(x)
+            x = [x1, x2] #torch.cat([x1, x2])
+        else:
+            x = self.layer4(x)
+            x = self.logits(x)
         return x
 
     def logits(self, x):
@@ -423,22 +453,30 @@ class SENet(nn.Module):
         if self.dropout is not None:
             x = self.dropout(x)
         x = x.view(x.size(0), -1)
-        x = self.last_linear(x)
         return x
 
     def forward(self, x):
         x = self.features(x)
-        if self.use_logits:
+        x = self.branches(x)
+        if not self.use_branch:
             x = self.logits(x)
+            x = self.last_linear(x)
         return x
-
 
 def initialize_pretrained_model(model, num_classes, settings, pretrained):
     assert num_classes == settings['num_classes'], \
         'num_classes should be {}, but is {}'.format(
             settings['num_classes'], num_classes)
+
     if not os.path.isfile(pretrained):
-        model.load_state_dict(model_zoo.load_url(settings['url']))
+        weights = model_zoo.load_url(settings['url'])
+        if getattr(model, 'layer5'):
+            for key in list(weights.keys()):
+                if 'layer4' in key:
+                    weights[key.replace('layer4', 'layer5')] = weights[key]
+
+        model.load_state_dict(weights, strict=False)
+    
     model.input_space = settings['input_space']
     model.input_size = settings['input_size']
     model.input_range = settings['input_range']
@@ -492,11 +530,11 @@ def se_resnet152(num_classes=1000, pretrained='imagenet'):
     return model
 
 
-def se_resnext50_32x4d(num_classes=1000, pretrained='imagenet', use_logits=True):
+def se_resnext50_32x4d(num_classes=1000, pretrained='imagenet', use_branch=False):
     model = SENet(SEResNeXtBottleneck, [3, 4, 6, 3], groups=32, reduction=16,
                   dropout_p=None, inplanes=64, input_3x3=False,
                   downsample_kernel_size=1, downsample_padding=0,
-                  num_classes=num_classes, use_logits=use_logits)
+                  num_classes=num_classes, use_branch=use_branch)
     if pretrained == 'imagenet':
         print('Load imagenet pretrained weights')
         settings = pretrained_settings['se_resnext50_32x4d']['imagenet']

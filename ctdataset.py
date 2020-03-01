@@ -48,7 +48,7 @@ class CTRecord(object):
         if 'rsna' in self._data[0]:
             return out[1:]
         else:
-            return out
+            return out[1:]
 
     @property
     def num_slices(self):
@@ -199,16 +199,31 @@ class CTDataSet(data.Dataset):
         also needs to calculate different masks for subdural part and parenchymal part
         '''
         masks = list()
+        erode_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (40, 40))
+        dilate_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (10, 10))
 
         reader = sitk.ReadImage(os.path.join(self.maskpath, filename + '.nii.gz')) # directory is actually the file name of nii's
         volume = sitk.GetArrayFromImage(reader)
+        _, h, w = volume.shape
 
         for idx in indices:
+
+            output = np.zeros((h, w, 3))
+
             # readin idx of original mask
-            imgs = volume[range(idx, idx + self.sample_thickness)] # the volume should include either 0 or 1
+            img = volume[idx] # the volume should include either 0 or 1
+            output[:, :, 0] = img
+
+            # calculate two masks
+            internal = cv2.morphologyEx(img, cv2.MORPH_ERODE, erode_kernel)
+            external = cv2.morphologyEx(internal, cv2.MORPH_DILATE, erode_kernel) - internal
+            external = cv2.morphologyEx(external, cv2.MORPH_DILATE, dilate_kernel)
 
             # mask should be average among the adjacent slices
-            masks.append(Image.fromarray(imgs.mean(axis=0).astype('float32')))
+            output[:, :, 1] = internal
+            output[:, :, 2] = external
+
+            masks.append(Image.fromarray(output.squeeze().astype(np.uint8)))
 
         return masks
 

@@ -97,21 +97,28 @@ class CMMT(nn.Module):
             normal_(self.alpha_net.weight, 0, std)
             constant_(self.alpha_net.bias, 0)
 
+        # update avg_pool between layer4 and last_linear 
         self.base_model.avg_pool = nn.AdaptiveAvgPool2d(1)
 
-        if self.dropout == 0:
-            setattr(self.base_model, self.base_model.last_layer_name, nn.Linear(feature_dim, num_class))
-            self.new_fc = None
-        else:
-            setattr(self.base_model, self.base_model.last_layer_name, nn.Dropout(p=self.dropout))
-            self.new_fc = nn.Linear(feature_dim, num_class)
+        # update last_linear weights
+        self.last_linear_1 = nn.Linear(128, 2)
+        self.last_linear_2 = nn.Linear(128, 2)
+        self.last_linear_0 = nn.Linear(128, 2)
+        normal_(self.last_linear_1.weight, 0, std)
+        constant_(self.last_linear_1.bias, 0)
+        normal_(self.last_linear_2.weight, 0, std)
+        constant_(self.last_linear_2.bias, 0)
+        normal_(self.last_linear_0.weight, 0, std)
+        constant_(self.last_linear_0.bias, 0)
 
-        if self.new_fc is None:
-            normal_(getattr(self.base_model, self.base_model.last_layer_name).weight, 0, std)
-            constant_(getattr(self.base_model, self.base_model.last_layer_name).bias, 0)
-        else:
-            normal_(self.new_fc.weight, 0, std)
-            constant_(self.new_fc.bias, 0)
+        # add a conv1x1 layer to 
+        self.branch_conv1 = nn.Conv2d(2048, 128, kernel_size=1, padding=0, bias=True)
+        self.branch_conv2 = nn.Conv2d(2048, 128, kernel_size=1, padding=0, bias=True)
+        normal_(self.branch_conv1.weight, 0, std)
+        constant_(self.branch_conv1.bias, 0)
+        normal_(self.branch_conv2.weight, 0, std)
+        constant_(self.branch_conv2.bias, 0)
+
         return feature_dim
 
     # change the original input str to the real models
@@ -127,7 +134,7 @@ class CMMT(nn.Module):
             self.input_std = [0.226]
 
         elif 'resnext' in base_model or base_model == 'bninception':
-            self.base_model = getattr(models_2d, base_model)(pretrained=self.pretrained, use_logits=False)
+            self.base_model = getattr(models_2d, base_model)(pretrained=self.pretrained, use_branch=True)
             self.base_model.last_layer_name = 'last_linear'
             self.input_size = getattr(self.base_model, 'input_size', [3, 224, 224])[-1]
             self.input_mean = getattr(self.base_model, 'mean', [0.485, 0.456, 0.406])
@@ -235,25 +242,16 @@ class CMMT(nn.Module):
 
     def forward(self, input, masks=None):
         # sample_len = 2 * self.new_length # here 2 means flow_x and flow_y, 3 for RGB
+        masks = masks.view((-1, self.channels) + masks.size()[-2:])
+        branch_out = self.base_model(input.view((-1, self.channels) + input.size()[-2:]))
+        branch_out = [self.branch_conv1(branch_out[0]), self.branch_conv2(branch_out[1])]
 
-        if masks is not None:
-            # model.eval to extract features from masks
-            self.base_model.eval()
-            with torch.no_grad():
-                mask_out = self.base_model(masks.view((-1, 1) + masks.size()[-2:]).repeat(1, 3, 1, 1))
-            # model.train to train the model
-            self.base_model.train()
-
-        base_out = self.base_model(input.view((-1, self.channels) + input.size()[-2:]))
-
-        if masks is not None:
-            base_out = base_out*mask_out # i.e. mmt_debug
-            # base_out = base_out*torch.sigmoid(mask_out) # i.e. mmt_logits
-            # base_out = base_out*torch.clamp(mask_out, 0, 3) # i.e. mmt_clamp
-            # base_out = base_out*((mask_out>0).to(torch.float32).cuda()) # i.e. mmt_01
-
-
-        base_out = self.base_model.logits(base_out)
+        # internal output
+        internal_out = self.base_model.logits(branch_out[0]* masks[:, 1].unsqueeze(1))
+        external_out = self.base_model.logits(branch_out[1]* masks[:, 2].unsqueeze(1))
+        total_out = self.last_linear_0(internal_out + external_out)
+        internal_out = self.last_linear_1(internal_out)
+        external_out = self.last_linear_2(external_out)
 
         if self.consensus == 'att':
             base_out = self.attention_net(base_out)
@@ -265,17 +263,21 @@ class CMMT(nn.Module):
         #     base_out = self.softmax(base_out)
 
         if self.reshape:
-            base_out = base_out.view((-1, self.num_segments) + base_out.size()[1:])
+            total_out = total_out.view((-1, self.num_segments) + total_out.size()[1:])
+            internal_out = internal_out.view((-1, self.num_segments) + internal_out.size()[1:])
+            external_out = external_out.view((-1, self.num_segments) + external_out.size()[1:])
 
         # output = self.consensus(base_out)
-        if self.consensus == 'avg':
-            output = base_out.mean(dim=1, keepdim=True)
-        elif self.consensus == 'max':
-            output = base_out.max(dim=1, keepdim=True)[0]
-        else:
-            output = base_out
+        # if self.consensus == 'avg':
+        #     output = base_out.mean(dim=1, keepdim=True)
+        # elif self.consensus == 'max':
+        #     output = base_out.max(dim=1, keepdim=True)[0]
+        # else:
+        #     output = base_out
 
-        return output.squeeze(1)
+        return total_out.mean(dim=1, keepdim=True).squeeze(1), \
+               internal_out.mean(dim=1, keepdim=True).squeeze(1), \
+               external_out.mean(dim=1, keepdim=True).squeeze(1)
 
     # def attention_net(self, base_out):
     #     att = self.feat2att(base_out) # batch*segments, attention_size

@@ -38,11 +38,13 @@ def train_epoch(epoch, data_loader, model, criterion, optimizer, opt, logger):
                 masks = inputs[1].cuda()
                 inputs = inputs[0].cuda()
                 outputs = model(inputs, masks)
+                loss = torch.cat((criterion(outputs[0], targets[:, [-6, -3]]), \
+                        criterion(outputs[1], targets[:, -5:-3]), \
+                        criterion(outputs[2], targets[:, -2:])), 1) 
             else:
                 inputs = inputs.cuda()
                 outputs = model(inputs)
-
-        loss = criterion(outputs, targets)       
+                loss = criterion(outputs, targets)
 
         # update with hard examples when learning rate is small
         if epoch > 100: #opt.n_epochs * 0.5 - 1:
@@ -66,17 +68,17 @@ def train_epoch(epoch, data_loader, model, criterion, optimizer, opt, logger):
 
         # loss.backward()
 
-        # print logits for debugging
-        neg = 0
-        pos = 0
-        for i in range(len(targets)):
-            if (not targets[i].shape and targets[i]==1) or (targets[i].shape and targets[i].cpu().numpy()[opt.concern_label]):
-                if pos < 2:
-                    print('positive logits:', outputs[i].data.cpu(), targets[i].data.cpu(), loss[i].mean().item())
-                    pos += 1
-            elif neg < 2:
-                print('\nnegative logits:', outputs[i].data.cpu(), targets[i].data.cpu(), loss[i].mean().item())
-                neg += 1
+        # # print logits for debugging
+        # neg = 0
+        # pos = 0
+        # for i in range(len(targets)):
+        #     if (not targets[i].shape and targets[i]==1) or (targets[i].shape and targets[i].cpu().numpy()[opt.concern_label]):
+        #         if pos < 2:
+        #             print('positive logits:', outputs[i].data.cpu(), targets[i].data.cpu(), loss[i].mean().item())
+        #             pos += 1
+        #     elif neg < 2:
+        #         print('\nnegative logits:', outputs[i].data.cpu(), targets[i].data.cpu(), loss[i].mean().item())
+        #         neg += 1
 
         # from TSN: clip gradients
         if opt.clip_gradient is not None:
@@ -123,12 +125,19 @@ def val_epoch(epoch, data_loader, model, criterion, opt, logger):
                     masks = inputs[1].cuda()
                     inputs = inputs[0].cuda()
                     outputs = model(inputs, masks)
+                    loss = torch.cat((criterion(outputs[0], targets[:, [-6, -3]]), \
+                            criterion(outputs[1], targets[:, -5:-3]), \
+                            criterion(outputs[2], targets[:, -2:])), 1) 
                 else:
                     inputs = inputs.cuda()
                     outputs = model(inputs)
+                    loss = criterion(outputs, targets)
 
-            # outputs = model(inputs.view((-1,) + inputs.shape[-4:]))
-            outputs = outputs.view(len(targets), -1, outputs.shape[-1]).mean(dim=1)  # max(dim=1)[0] or mean(dim=1)
+            if opt.model_type == 'mmt':
+                outputs = torch.index_select(torch.cat(outputs, 1), 1, torch.LongTensor([0, 2, 3, 1, 4, 5]).cuda()) 
+            else:
+                # outputs = model(inputs.view((-1,) + inputs.shape[-4:]))
+                outputs = outputs.view(len(targets), -1, outputs.shape[-1]).mean(dim=1)  # max(dim=1)[0] or mean(dim=1)
 
             all_outputs.extend(outputs.cpu().numpy())
             all_targets.extend(targets.cpu().numpy())

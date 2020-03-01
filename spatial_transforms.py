@@ -125,7 +125,7 @@ class GroupRandomCrop(object):
                     out_masks.append(mask)
                 else:
                     out_images.append(img.crop((x1, y1, x1 + tw, y1 + th)))
-                    out_masks.append(maskmask.crop((x1, y1, x1 + tw, y1 + th)))
+                    out_masks.append(mask.crop((x1, y1, x1 + tw, y1 + th)))
             return out_images, out_masks
 
         else:
@@ -382,11 +382,10 @@ class ToTorchTensor(object):
         '''Transfer image to torch tensor, i.e. ToTensor
         '''
         if is_mask:
-            img = np.concatenate([np.expand_dims(x, 2) for x in imgs], axis=2) # 512 x 512 x N(image numbers)
-            img = torch.from_numpy(img).permute(2, 0, 1).contiguous() # N x 512 x 512
-        else:
-            img = np.concatenate([np.expand_dims(x, 0) for x in imgs], axis=0) # N x 512 x 512 x 3
-            img = torch.from_numpy(img).permute(0, 3, 1, 2).contiguous() # N x 3 x 512 x512
+            imgs = [x.resize((14, 14), Image.ANTIALIAS) for x in imgs]
+            
+        img = np.concatenate([np.expand_dims(x, 0) for x in imgs], axis=0) # N x 512 x 512 x 3
+        img = torch.from_numpy(img).permute(0, 3, 1, 2).contiguous() # N x 3 x 512 x512
 
         return img
 
@@ -412,7 +411,7 @@ class GroupNormalize(object):
             new_tensor[i] += tensor[i].sub(self.mean).div(self.std)
 
         if mask_tensor is not None:
-            return new_tensor, mask_tensor.sub_(0.5).div_(0.25)
+            return new_tensor, mask_tensor.float() #.sub_(0.5).div_(0.25)
         else:
             return new_tensor
 

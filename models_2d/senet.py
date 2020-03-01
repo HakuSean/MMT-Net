@@ -445,7 +445,6 @@ class SENet(nn.Module):
             x = [x1, x2] #torch.cat([x1, x2])
         else:
             x = self.layer4(x)
-            x = self.logits(x)
         return x
 
     def logits(self, x):
@@ -470,7 +469,7 @@ def initialize_pretrained_model(model, num_classes, settings, pretrained):
 
     if not os.path.isfile(pretrained):
         weights = model_zoo.load_url(settings['url'])
-        if getattr(model, 'layer5'):
+        if getattr(model, 'layer5', False):
             for key in list(weights.keys()):
                 if 'layer4' in key:
                     weights[key.replace('layer4', 'layer5')] = weights[key]

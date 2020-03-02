@@ -374,7 +374,7 @@ class ToTorchTensor(object):
             img =  img.mul(255.0)
         
         if mask is not None:
-            return img, self.imgs2tensor(mask, is_mask=True)
+            return img, self.imgs2tensor(mask)#, is_mask=True)
         else:
             return img
 

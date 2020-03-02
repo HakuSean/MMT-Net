@@ -100,6 +100,9 @@ class CMMT(nn.Module):
 
         # update avg_pool between layer4 and last_linear 
         self.base_model.avg_pool = nn.AdaptiveAvgPool2d(1)
+        setattr(self.base_model, self.base_model.last_layer_name, nn.Linear(feature_dim, num_class))
+        normal_(getattr(self.base_model, self.base_model.last_layer_name).weight, 0, std_linear)
+        constant_(getattr(self.base_model, self.base_model.last_layer_name).bias, 0)
 
         # update last_linear weights
         self.last_linear_1 = nn.Linear(128, 2)
@@ -135,7 +138,7 @@ class CMMT(nn.Module):
             self.input_std = [0.226]
 
         elif 'resnext' in base_model or base_model == 'bninception':
-            self.base_model = getattr(models_2d, base_model)(pretrained=self.pretrained, use_branch=True)
+            self.base_model = getattr(models_2d, base_model)(pretrained=self.pretrained, use_branch=False)
             self.base_model.last_layer_name = 'last_linear'
             self.input_size = getattr(self.base_model, 'input_size', [3, 224, 224])[-1]
             self.input_mean = getattr(self.base_model, 'mean', [0.485, 0.456, 0.406])
@@ -243,16 +246,19 @@ class CMMT(nn.Module):
 
     def forward(self, input, masks=None):
         # sample_len = 2 * self.new_length # here 2 means flow_x and flow_y, 3 for RGB
-        masks = masks.view((-1, self.channels) + masks.size()[-2:])
+        # masks = masks.view((-1, self.channels) + masks.size()[-2:])
+        input = input * masks
         branch_out = self.base_model(input.view((-1, self.channels) + input.size()[-2:]))
-        branch_out = [self.branch_conv1(branch_out[0]), self.branch_conv2(branch_out[1])]
+
+        return branch_out.view((-1, self.num_segments) + branch_out.size()[1:]).mean(dim=1, keepdim=True).squeeze(1)
+        # branch_out = [self.branch_conv1(branch_out[0]), self.branch_conv2(branch_out[1])]
 
         # internal output
-        internal_out = self.base_model.logits(branch_out[0]* masks[:, 1].unsqueeze(1))
-        external_out = self.base_model.logits(branch_out[1]* masks[:, 2].unsqueeze(1))
-        total_out = self.last_linear_0(internal_out + external_out)
-        internal_out = self.last_linear_1(internal_out)
-        external_out = self.last_linear_2(external_out)
+        # internal_out = self.base_model.logits(branch_out[0]* masks[:, 1].unsqueeze(1))
+        # external_out = self.base_model.logits(branch_out[1]* masks[:, 2].unsqueeze(1))
+        # total_out = self.last_linear_0(internal_out + external_out)
+        # internal_out = self.last_linear_1(internal_out)
+        # external_out = self.last_linear_2(external_out)
 
         if self.consensus == 'att':
             base_out = self.attention_net(base_out)
@@ -263,10 +269,10 @@ class CMMT(nn.Module):
         # if not self.before_softmax:
         #     base_out = self.softmax(base_out)
 
-        if self.reshape:
-            total_out = total_out.view((-1, self.num_segments) + total_out.size()[1:])
-            internal_out = internal_out.view((-1, self.num_segments) + internal_out.size()[1:])
-            external_out = external_out.view((-1, self.num_segments) + external_out.size()[1:])
+        # if self.reshape:
+        #     total_out = total_out.view((-1, self.num_segments) + total_out.size()[1:])
+        #     internal_out = internal_out.view((-1, self.num_segments) + internal_out.size()[1:])
+        #     external_out = external_out.view((-1, self.num_segments) + external_out.size()[1:])
 
         # output = self.consensus(base_out)
         # if self.consensus == 'avg':
@@ -276,9 +282,9 @@ class CMMT(nn.Module):
         # else:
         #     output = base_out
 
-        return total_out.mean(dim=1, keepdim=True).squeeze(1), \
-               internal_out.mean(dim=1, keepdim=True).squeeze(1), \
-               external_out.mean(dim=1, keepdim=True).squeeze(1)
+        # return total_out.mean(dim=1, keepdim=True).squeeze(1), \
+        #        internal_out.mean(dim=1, keepdim=True).squeeze(1), \
+        #        external_out.mean(dim=1, keepdim=True).squeeze(1)
 
     # def attention_net(self, base_out):
     #     att = self.feat2att(base_out) # batch*segments, attention_size

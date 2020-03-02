@@ -104,7 +104,7 @@ class CMMT(nn.Module):
         # update last_linear weights
         self.last_linear_1 = nn.Linear(128, 2)
         self.last_linear_2 = nn.Linear(128, 2)
-        self.last_linear_0 = nn.Linear(128, 2)
+        self.last_linear_0 = nn.Linear(128, 3)
         normal_(self.last_linear_1.weight, 0, std_linear)
         constant_(self.last_linear_1.bias, 0)
         normal_(self.last_linear_2.weight, 0, std_linear)

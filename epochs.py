@@ -38,8 +38,8 @@ def train_epoch(epoch, data_loader, model, criterion, optimizer, opt, logger):
                 masks = inputs[1].cuda()
                 inputs = inputs[0].cuda()
                 outputs = model(inputs, masks)
-                loss = torch.cat((criterion(outputs[0], targets[:, [-6, -3]]), \
-                        criterion(outputs[1], targets[:, -5:-3]), \
+                loss = torch.cat((criterion(outputs[0], targets[:, :-4]), \
+                        criterion(outputs[1], targets[:, -4:-2]), \
                         criterion(outputs[2], targets[:, -2:])), 1) 
             else:
                 inputs = inputs.cuda()
@@ -125,8 +125,8 @@ def val_epoch(epoch, data_loader, model, criterion, opt, logger):
                     masks = inputs[1].cuda()
                     inputs = inputs[0].cuda()
                     outputs = model(inputs, masks)
-                    loss = torch.cat((criterion(outputs[0], targets[:, [-6, -3]]), \
-                            criterion(outputs[1], targets[:, -5:-3]), \
+                    loss = torch.cat((criterion(outputs[0], targets[:, :-4]), \
+                            criterion(outputs[1], targets[:, -4:-2]), \
                             criterion(outputs[2], targets[:, -2:])), 1) 
                 else:
                     inputs = inputs.cuda()
@@ -134,7 +134,7 @@ def val_epoch(epoch, data_loader, model, criterion, opt, logger):
                     loss = criterion(outputs, targets)
 
             if opt.model_type == 'mmt':
-                outputs = torch.index_select(torch.cat(outputs, 1), 1, torch.LongTensor([0, 2, 3, 1, 4, 5]).cuda()) 
+                outputs = torch.cat(outputs, 1).cuda() 
             else:
                 # outputs = model(inputs.view((-1,) + inputs.shape[-4:]))
                 outputs = outputs.view(len(targets), -1, outputs.shape[-1]).mean(dim=1)  # max(dim=1)[0] or mean(dim=1)

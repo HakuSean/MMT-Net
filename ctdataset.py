@@ -37,18 +37,21 @@ class CTRecord(object):
         tags = self._data[-1].split(',')
 
         out = [0.] * 7
+        # mapping: (0, 1, 2, 3, 4, 5, 6, 7, 8) -> (x, 0, 1, x, 3, 4, 2, 5, 6)
         for i in tags:
             if i == '0':
                 break
-            elif i == '1' or i == '2':
+            elif i == '1' or i == '2' or i == '4' or i == '5':
                 out[int(i) - 1] = 1.
-            else:
+            elif i == '7' or i == '8':
                 out[int(i) - 2] = 1.
+            elif i == '6':
+                out[2] = 1.
 
         if 'rsna' in self._data[0]:
             return out[1:]
         else:
-            return out[1:]
+            return out
 
     @property
     def num_slices(self):

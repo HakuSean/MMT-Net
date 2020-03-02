@@ -162,11 +162,11 @@ def parse_opts():
 
     args = parser.parse_args()
 
-    # if args.dataset == 'rsna':
-    args.n_classes = 6
-    args.concern_label = 0
-    # else:
-    #     args.n_classes = 7
-    #     args.concern_label = 1
+    if args.dataset == 'rsna':
+        args.n_classes = 6
+        args.concern_label = 0
+    else:
+        args.n_classes = 7
+        args.concern_label = 1
 
     return args

@@ -382,7 +382,8 @@ class ToTorchTensor(object):
         '''Transfer image to torch tensor, i.e. ToTensor
         '''
         if is_mask:
-            imgs = [x.resize((14, 14), Image.ANTIALIAS) for x in imgs]
+            img_size = np.array(imgs[0]).shape[0]
+            imgs = [x.resize((img_size//32, img_size//32), Image.ANTIALIAS) for x in imgs]
             
         img = np.concatenate([np.expand_dims(x, 0) for x in imgs], axis=0) # N x 512 x 512 x 3
         img = torch.from_numpy(img).permute(0, 3, 1, 2).contiguous() # N x 3 x 512 x512

@@ -35,21 +35,16 @@ def train_epoch(epoch, data_loader, model, criterion, optimizer, opt, logger):
         if torch.cuda.is_available():
             targets = targets.cuda()
             if opt.model_type == 'mmt':
-                masks = inputs[1].cuda()
+                # use masks as labels: all, internal, external
+                masks = inputs[1].view((-1, opt.n_channels) + inputs[1].size()[-2:]).cuda()
                 inputs = inputs[0].cuda()
-                outputs = model(inputs, masks)
-                # loss = torch.cat((criterion(outputs[0], targets[:, :-4]), \
-                #         criterion(outputs[1], targets[:, -4:-2]), \
-                #         criterion(outputs[2], targets[:, -2:])), 1)
-                loss = criterion(outputs, targets)
             elif opt.model_type == 'mtsn':
                 inputs = inputs[0].cuda()
-                outputs = model(inputs)
-                loss = criterion(outputs, targets)
             else:
                 inputs = inputs.cuda()
-                outputs = model(inputs)
-                loss = criterion(outputs, targets)
+        
+        outputs = model(inputs)
+        loss = criterion(outputs, targets)
 
         # update with hard examples when learning rate is small
         if epoch > 100: #opt.n_epochs * 0.5 - 1:
@@ -127,27 +122,18 @@ def val_epoch(epoch, data_loader, model, criterion, opt, logger):
             if torch.cuda.is_available():
                 targets = targets.cuda()
                 if opt.model_type == 'mmt':
-                    masks = inputs[1].cuda()
+                    # use masks as labels: all, internal, external
+                    masks = inputs[1].view((-1, opt.n_channels) + inputs[1].size()[-2:]).cuda()
                     inputs = inputs[0].cuda()
-                    outputs = model(inputs, masks)
-                    # loss = torch.cat((criterion(outputs[0], targets[:, :-4]), \
-                    #         criterion(outputs[1], targets[:, -4:-2]), \
-                    #         criterion(outputs[2], targets[:, -2:])), 1)
-                    loss = criterion(outputs, targets)
                 elif opt.model_type == 'mtsn':
                     inputs = inputs[0].cuda()
-                    outputs = model(inputs)
-                    loss = criterion(outputs, targets)
                 else:
                     inputs = inputs.cuda()
-                    outputs = model(inputs)
-                    loss = criterion(outputs, targets)
 
-            if opt.model_type == 'mmt':
-                outputs = torch.cat(outputs, 1).cuda()
-            else:
-                # outputs = model(inputs.view((-1,) + inputs.shape[-4:]))
-                outputs = outputs.view(len(targets), -1, outputs.shape[-1]).mean(dim=1)  # max(dim=1)[0] or mean(dim=1)
+            outputs = model(inputs)
+            loss = criterion(outputs, targets)
+
+            outputs = outputs.view(len(targets), -1, outputs.shape[-1]).mean(dim=1)  # max(dim=1)[0] or mean(dim=1)
 
             all_outputs.extend(outputs.cpu().numpy())
             all_targets.extend(targets.cpu().numpy())

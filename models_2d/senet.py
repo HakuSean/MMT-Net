@@ -529,9 +529,9 @@ def se_resnet152(num_classes=1000, pretrained='imagenet'):
     return model
 
 
-def se_resnext50_32x4d(num_classes=1000, pretrained='imagenet', use_branch=False):
+def se_resnext50_32x4d(num_classes=1000, pretrained='imagenet', use_branch=False, dropout_p=None):
     model = SENet(SEResNeXtBottleneck, [3, 4, 6, 3], groups=32, reduction=16,
-                  dropout_p=None, inplanes=64, input_3x3=False,
+                  dropout_p=dropout_p, inplanes=64, input_3x3=False,
                   downsample_kernel_size=1, downsample_padding=0,
                   num_classes=num_classes, use_branch=use_branch)
     if pretrained == 'imagenet':

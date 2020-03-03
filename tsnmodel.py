@@ -98,19 +98,10 @@ class CTSN(nn.Module):
 
         self.base_model.avg_pool = nn.AdaptiveAvgPool2d(1)
 
-        if self.dropout == 0:
-            setattr(self.base_model, self.base_model.last_layer_name, nn.Linear(feature_dim, num_class))
-            self.new_fc = None
-        else:
-            setattr(self.base_model, self.base_model.last_layer_name, nn.Dropout(p=self.dropout))
-            self.new_fc = nn.Linear(feature_dim, num_class)
+        setattr(self.base_model, self.base_model.last_layer_name, nn.Linear(feature_dim, num_class))
+        normal_(getattr(self.base_model, self.base_model.last_layer_name).weight, 0, std)
+        constant_(getattr(self.base_model, self.base_model.last_layer_name).bias, 0)
 
-        if self.new_fc is None:
-            normal_(getattr(self.base_model, self.base_model.last_layer_name).weight, 0, std)
-            constant_(getattr(self.base_model, self.base_model.last_layer_name).bias, 0)
-        else:
-            normal_(self.new_fc.weight, 0, std)
-            constant_(self.new_fc.bias, 0)
         return feature_dim
 
     # change the original input str to the real models
@@ -126,7 +117,7 @@ class CTSN(nn.Module):
             self.input_std = [0.226]
 
         elif 'resnext' in base_model or base_model == 'bninception':
-            self.base_model = getattr(models_2d, base_model)(pretrained=self.pretrained)
+            self.base_model = getattr(models_2d, base_model)(pretrained=self.pretrained, dropout_p=self.dropout)
             self.base_model.last_layer_name = 'last_linear'
             self.input_size = getattr(self.base_model, 'input_size', [3, 224, 224])[-1]
             self.input_mean = getattr(self.base_model, 'mean', [0.485, 0.456, 0.406])
@@ -236,9 +227,6 @@ class CTSN(nn.Module):
 
         if self.consensus == 'att':
             base_out = self.attention_net(base_out)
-
-        if self.dropout > 0:
-            base_out = self.new_fc(base_out)
 
         # if not self.before_softmax:
         #     base_out = self.softmax(base_out)

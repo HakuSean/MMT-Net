@@ -82,7 +82,7 @@ if __name__ == '__main__':
 
     if args.model_type == '3d':
         model, parameters = generate_3d(args)
-    elif args.model_type == 'tsn':
+    elif 'tsn' in args.model_type:
         model, parameters = generate_tsn(args)
     elif args.model_type == 'mmt' :
         model, parameters = generate_mmt(args)
@@ -251,15 +251,15 @@ if __name__ == '__main__':
     # -----------------------------------------
     # --- prepare dataset (validation) --------
     # -----------------------------------------
-    # val_spatial_transform = transforms.Compose([
-    #     GroupResize(args.sample_size if args.model_type == 'tsn' and args.sample_size >= 300 else 512),
-    #     GroupCenterCrop(crop_size),
-    #     ToTorchTensor(args.model_type, norm=norm_value, caffe_pretrain=args.arch == 'bninception'),
-    #     norm_method, 
-    # ])
+    val_spatial_transform = compose([
+        GroupResize(args.sample_size),
+        GroupCenterCrop(args.sample_size),
+        ToTorchTensor(args.model_type, norm=norm_value, caffe_pretrain=args.arch == 'bninception'),
+        norm_method,
+    ])
 
     val_temporal_transform = TemporalSegmentCrop(args.n_slices, args.sample_thickness, test=True)
-    validation_data = CTDataSet(val_list, args, spatial_transform, val_temporal_transform)
+    validation_data = CTDataSet(val_list, args, val_spatial_transform, val_temporal_transform)
     val_loader = torch.utils.data.DataLoader(
         validation_data,
         batch_size=args.batch_size,

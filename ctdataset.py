@@ -164,7 +164,7 @@ class CTDataSet(data.Dataset):
                 
                 _, h, w = imgs.shape
 
-                windows = [(50, 80), (40, 200), (60, 360)] # blood, brain, tissue
+                windows = [(50, 80), (60, 360), (60, 360)] # blood, brain, tissue
                 output = np.zeros((h, w, 3)) 
 
                 for frame in imgs:                    
@@ -182,10 +182,6 @@ class CTDataSet(data.Dataset):
 
                 samples.append(Image.fromarray(output.astype(np.uint8)))
 
-            # # use mask:
-            # if self.model_type == 'mmt':
-            #     masks = self._parse_mask(mask_volume, indices)
-
         elif self.input_format in set(['nifti', 'nii', 'nii.gz']):
             reader = sitk.ReadImage(directory + '.' + self.input_format) # directory is actually the file name of nii's
             volume = sitk.GetArrayFromImage(reader)
@@ -201,7 +197,7 @@ class CTDataSet(data.Dataset):
                 imgs = volume[range(idx, idx + self.sample_thickness)]
                 samples.append(Image.fromarray(imgs.mean(axis=0).astype('float32')))
 
-        if self.model_type == 'mmt':
+        if 'mt' in self.model_type:
             return record, samples, masks
         else:
             return record, samples
@@ -236,11 +232,6 @@ class CTDataSet(data.Dataset):
         # mask should be average among the adjacent slices
         output[:, :, 1] = internal
         output[:, :, 2] = external
-
-        # if self.model_type == 'mtsn':
-        #     masks.append(output.squeeze())
-        # else:
-        #     masks.append(Image.fromarray(output.squeeze().astype(np.uint8)))
 
         return output
 
@@ -298,17 +289,18 @@ class CTDataSet(data.Dataset):
     def __getitem__(self, index):
         record = self.ct_list[index]
 
-        if self.model_type == 'mmt' and record.num_slices == -1:
+        if 'mt' in self.model_type and record.num_slices == -1:
             self.ct_list[index], images, masks = self._load_images(record) # update record for the first time input
-        elif self.model_type == 'mmt':
+        elif 'mt' in self.model_type:
             _, images, masks = self._load_images(record)
         elif record.num_slices == -1:
             self.ct_list[index], images = self._load_images(record)
         else:
             _, images = self._load_images(record)
 
-        if self.model_type == 'mmt':
-            return self.spatial_transform(images, masks), torch.tensor(record.label, dtype=self.dtype), record.path.rsplit('/', 1)[-1]
+        if 'mt' in self.model_type:
+            images, masks = self.spatial_transform(images, masks)
+            return (images * masks, masks), torch.tensor(record.label, dtype=self.dtype), record.path.rsplit('/', 1)[-1]
         else:
             return self.spatial_transform(images), torch.tensor(record.label, dtype=self.dtype), record.path.rsplit('/', 1)[-1]
 

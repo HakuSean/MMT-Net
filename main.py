@@ -153,7 +153,7 @@ if __name__ == '__main__':
         crop_method = GroupCenterCrop(args.sample_size)
 
     # define spatial and temporal transform
-    if args.model_type == 'mmt':
+    if 'mt' in args.model_type:
         compose = MaskCompose
     else:
         compose = transforms.Compose

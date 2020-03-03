@@ -42,6 +42,10 @@ def train_epoch(epoch, data_loader, model, criterion, optimizer, opt, logger):
                 #         criterion(outputs[1], targets[:, -4:-2]), \
                 #         criterion(outputs[2], targets[:, -2:])), 1)
                 loss = criterion(outputs, targets)
+            elif opt.model_type == 'mtsn':
+                inputs = inputs[0].cuda()
+                outputs = model(inputs)
+                loss = criterion(outputs, targets)
             else:
                 inputs = inputs.cuda()
                 outputs = model(inputs)
@@ -130,21 +134,24 @@ def val_epoch(epoch, data_loader, model, criterion, opt, logger):
                     #         criterion(outputs[1], targets[:, -4:-2]), \
                     #         criterion(outputs[2], targets[:, -2:])), 1)
                     loss = criterion(outputs, targets)
+                elif opt.model_type == 'mtsn':
+                    inputs = inputs[0].cuda()
+                    outputs = model(inputs)
+                    loss = criterion(outputs, targets)
                 else:
                     inputs = inputs.cuda()
                     outputs = model(inputs)
                     loss = criterion(outputs, targets)
 
-            # if opt.model_type == 'mmt':
-            #     outputs = torch.cat(outputs, 1).cuda()
-            # else:
+            if opt.model_type == 'mmt':
+                outputs = torch.cat(outputs, 1).cuda()
+            else:
                 # outputs = model(inputs.view((-1,) + inputs.shape[-4:]))
-            outputs = outputs.view(len(targets), -1, outputs.shape[-1]).mean(dim=1)  # max(dim=1)[0] or mean(dim=1)
+                outputs = outputs.view(len(targets), -1, outputs.shape[-1]).mean(dim=1)  # max(dim=1)[0] or mean(dim=1)
 
             all_outputs.extend(outputs.cpu().numpy())
             all_targets.extend(targets.cpu().numpy())
 
-            loss = criterion(outputs, targets)
             losses.update(loss.mean().item(), inputs.size(0))
 
             batch_time.update(time.time() - end_time)

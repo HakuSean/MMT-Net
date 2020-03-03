@@ -247,7 +247,7 @@ class CMMT(nn.Module):
     def forward(self, input, masks=None):
         # sample_len = 2 * self.new_length # here 2 means flow_x and flow_y, 3 for RGB
         # masks = masks.view((-1, self.channels) + masks.size()[-2:])
-        input = input * masks
+        # input = input * masks
         branch_out = self.base_model(input.view((-1, self.channels) + input.size()[-2:]))
 
         return branch_out.view((-1, self.num_segments) + branch_out.size()[1:]).mean(dim=1, keepdim=True).squeeze(1)

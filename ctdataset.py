@@ -164,7 +164,10 @@ class CTDataSet(data.Dataset):
                 
                 _, h, w = imgs.shape
 
-                windows = [(50, 80), (60, 360), (60, 360)] # blood, brain, tissue
+                if 'mt' in self.model_type:
+                    windows = [(50, 80), (60, 360), (60, 360)] # blood, tissue
+                else:
+                    windows = [(50, 80), (40, 200), (60, 360)] # blood, brain, tissue
                 output = np.zeros((h, w, 3)) 
 
                 for frame in imgs:                    
@@ -177,7 +180,7 @@ class CTDataSet(data.Dataset):
                 output = output.squeeze()/self.sample_thickness
                 if 'mt' in self.model_type:
                     mask = self._parse_mask(mask_volume, slice_idx)
-                    output = output * mask
+                    output = output * mask # the only reason for this is crop and resize
                     masks.append(Image.fromarray(mask.squeeze().astype(np.uint8)))
 
                 samples.append(Image.fromarray(output.astype(np.uint8)))
@@ -209,8 +212,8 @@ class CTDataSet(data.Dataset):
 
         also needs to calculate different masks for subdural part and parenchymal part
         '''
-        erode_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (40, 40))
-        dilate_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (10, 10))
+        erode_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (30, 30))
+        dilate_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
 
         # for idx in indices:
         # readin idx of original mask

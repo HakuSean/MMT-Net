@@ -146,8 +146,14 @@ class CTDataSet(data.Dataset):
             
             # select dicom slices from original folder
             indices = self.temporal_transform(record)
+            if "mt" in self.model_type:
+                mask_volume = os.path.join(self.maskpath, record.path.rsplit('/', 1)[-1])
+                # if not os.path.exists(mask_volume) or not len(os.listdir(mask_volume)) == len(dicom_names):
+                #     mask_reader = sitk.ReadImage(os.path.join(self.maskpath + '_nii', record.path.rsplit('/', 1)[-1] + '.nii.gz')) # directory is actually the file name of nii's
+                #     mask_volume = sitk.GetArrayFromImage(mask_reader)
 
             # for each selected slice: consider multiple adjacent slices
+            masks = list()
             for slice_idx in indices:
                 reader.SetFileNames(dicom_names[slice_idx:slice_idx + self.sample_thickness])
                 try:
@@ -168,11 +174,17 @@ class CTDataSet(data.Dataset):
                         sub_img = np.clip(frame, yMin, yMax)
                         output[:, :, win_idx] += (sub_img - yMin) / (yMax - yMin) * 255 # round image to 0-255
 
-                samples.append(Image.fromarray((output.squeeze()/self.sample_thickness).astype(np.uint8)))
+                output = output.squeeze()/self.sample_thickness
+                if 'mt' in self.model_type:
+                    mask = self._parse_mask(mask_volume, slice_idx)
+                    output = output * mask
+                    masks.append(Image.fromarray(mask.squeeze().astype(np.uint8)))
 
-            # use mask:
-            if self.model_type == 'mmt':
-                masks = self._parse_mask(record.path.rsplit('/', 1)[-1], indices)
+                samples.append(Image.fromarray(output.astype(np.uint8)))
+
+            # # use mask:
+            # if self.model_type == 'mmt':
+            #     masks = self._parse_mask(mask_volume, indices)
 
         elif self.input_format in set(['nifti', 'nii', 'nii.gz']):
             reader = sitk.ReadImage(directory + '.' + self.input_format) # directory is actually the file name of nii's
@@ -194,41 +206,43 @@ class CTDataSet(data.Dataset):
         else:
             return record, samples
 
-    def _parse_mask(self, filename, indices):
+    def _parse_mask(self, volume, idx):
         '''
         This function is used to load the mask of brain from the original 3d slices.
         The masks are pre-extracted by using a UNet
 
         also needs to calculate different masks for subdural part and parenchymal part
         '''
-        masks = list()
         erode_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (40, 40))
         dilate_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (10, 10))
 
-        reader = sitk.ReadImage(os.path.join(self.maskpath, filename + '.nii.gz')) # directory is actually the file name of nii's
-        volume = sitk.GetArrayFromImage(reader)
-        _, h, w = volume.shape
-
-        for idx in indices:
-
-            output = np.zeros((h, w, 3))
-
-            # readin idx of original mask
+        # for idx in indices:
+        # readin idx of original mask
+        if type(volume) == str:
+            img = cv2.imread(volume + '/{}.png'.format(idx), cv2.IMREAD_GRAYSCALE)
+        else:
             img = volume[idx] # the volume should include either 0 or 1
-            output[:, :, 0] = img
+        
+        # define output and put first mask to 0
+        h, w = img.shape
+        output = np.zeros((h, w, 3))
+        output[:, :, 0] = img
 
-            # calculate two masks
-            internal = cv2.morphologyEx(img, cv2.MORPH_ERODE, erode_kernel)
-            external = cv2.morphologyEx(internal, cv2.MORPH_DILATE, erode_kernel) - internal
-            external = cv2.morphologyEx(external, cv2.MORPH_DILATE, dilate_kernel)
+        # calculate two masks
+        internal = cv2.morphologyEx(img, cv2.MORPH_ERODE, erode_kernel)
+        external = cv2.morphologyEx(internal, cv2.MORPH_DILATE, erode_kernel) - internal
+        external = cv2.morphologyEx(external, cv2.MORPH_DILATE, dilate_kernel)
 
-            # mask should be average among the adjacent slices
-            output[:, :, 1] = internal
-            output[:, :, 2] = external
+        # mask should be average among the adjacent slices
+        output[:, :, 1] = internal
+        output[:, :, 2] = external
 
-            masks.append(Image.fromarray(output.squeeze().astype(np.uint8)))
+        # if self.model_type == 'mtsn':
+        #     masks.append(output.squeeze())
+        # else:
+        #     masks.append(Image.fromarray(output.squeeze().astype(np.uint8)))
 
-        return masks
+        return output
 
 
     def _parse_list(self):

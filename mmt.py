@@ -113,7 +113,7 @@ class CMMT(nn.Module):
         normal_(self.last_linear_0.weight, 0, std_linear)
         constant_(self.last_linear_0.bias, 0)
 
-        # add a conv1x1 layer to 
+        # add branch bottle necks for message passing
         self.branch1 = nn.Sequential(
             nn.Conv2d(2048, 512, kernel_size=1, padding=0, bias=True),
             nn.BatchNorm2d(512),
@@ -134,6 +134,17 @@ class CMMT(nn.Module):
         constant_(self.branch1[0].bias, 0)
         normal_(self.branch2[0].weight, 0, std_conv)
         constant_(self.branch2[0].bias, 0)
+
+        # add conv1x1 layers to build mask output
+        self.mask_out1 = nn.Sequential(
+            nn.Conv2d(2048, 1, kernel_size=1, padding=0, bias=True),
+            nn.Sigmoid()
+            )
+        self.mask_out2 = nn.Sequential(
+            nn.Conv2d(2048, 1, kernel_size=1, padding=0, bias=True),
+            nn.Sigmoid()
+            )
+
 
         return feature_dim
 
@@ -260,6 +271,7 @@ class CMMT(nn.Module):
         # sample_len = 2 * self.new_length # here 2 means flow_x and flow_y, 3 for RGB
         branch_out = self.base_model(input.view((-1, self.channels) + input.size()[-2:]))
         message = [self.branch1(branch_out[0]), self.branch2(branch_out[1])]
+        mask_out = [self.mask_out1(branch_out[0]), self.mask_out2(branch_out[1])]
 
         # after message passing
         internal_out = self.base_model.logits(F.relu(message[1] + branch_out[0]))
@@ -293,7 +305,7 @@ class CMMT(nn.Module):
         else:
             output = base_out
 
-        return output
+        return output, ((mask_out[0] > 0).to(torch.float), (mask_out[1] > 0).to(torch.float))
 
     # def attention_net(self, base_out):
     #     att = self.feat2att(base_out) # batch*segments, attention_size

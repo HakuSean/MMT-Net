@@ -9,8 +9,11 @@ import ipdb
 from utils import AverageMeter, calculate_accuracy, f1_score, fuse_2d, grad_cam, show_cam_on_image, ModelOutputs
 import numpy as np
 from sklearn.metrics import average_precision_score
+from utils import DiceLoss
 
 from apex import amp
+
+dice_loss = DiceLoss()
 
 def train_epoch(epoch, data_loader, model, criterion, optimizer, opt, logger):
     print('train at epoch {}'.format(epoch))
@@ -36,15 +39,19 @@ def train_epoch(epoch, data_loader, model, criterion, optimizer, opt, logger):
             targets = targets.cuda()
             if opt.model_type == 'mmt':
                 # use masks as labels: all, internal, external
-                masks = inputs[1].view((-1, opt.n_channels) + inputs[1].size()[-2:]).cuda()
+                masks = F.interpolate(inputs[1].view((-1, opt.n_channels) + inputs[1].size()[-2:]).cuda(), size=[inputs[1].size()[-1]//32, inputs[1].size()[-1]//32])
                 inputs = inputs[0].cuda()
             elif opt.model_type == 'mtsn':
                 inputs = inputs[0].cuda()
             else:
                 inputs = inputs.cuda()
         
-        outputs = model(inputs)
-        loss = criterion(outputs, targets)
+        if opt.model_type == 'mmt':
+            outputs, branch_out = model(inputs)
+            loss = criterion(outputs, targets) + dice_loss(branch_out[0], masks[:, 1]) + dice_loss(branch_out[1], masks[:, 2])
+        else:
+            outputs = model(inputs)
+            loss = criterion(outputs, targets)
 
         # update with hard examples when learning rate is small
         if epoch > 100: #opt.n_epochs * 0.5 - 1:
@@ -123,15 +130,19 @@ def val_epoch(epoch, data_loader, model, criterion, opt, logger):
                 targets = targets.cuda()
                 if opt.model_type == 'mmt':
                     # use masks as labels: all, internal, external
-                    masks = inputs[1].view((-1, opt.n_channels) + inputs[1].size()[-2:]).cuda()
+                    masks = F.interpolate(inputs[1].view((-1, opt.n_channels) + inputs[1].size()[-2:]).cuda(), size=[inputs[1].size()[-1]//32, inputs[1].size()[-1]//32])
                     inputs = inputs[0].cuda()
                 elif opt.model_type == 'mtsn':
                     inputs = inputs[0].cuda()
                 else:
                     inputs = inputs.cuda()
-
-            outputs = model(inputs)
-            loss = criterion(outputs, targets)
+            
+            if opt.model_type == 'mmt':
+                outputs, branch_out = model(inputs)
+                loss = criterion(outputs, targets) + dice_loss(branch_out[0], masks[:, 1]) + dice_loss(branch_out[1], masks[:, 2])
+            else:
+                outputs = model(inputs)
+                loss = criterion(outputs, targets)
 
             outputs = outputs.view(len(targets), -1, outputs.shape[-1]).mean(dim=1)  # max(dim=1)[0] or mean(dim=1)
 
@@ -159,7 +170,7 @@ def val_epoch(epoch, data_loader, model, criterion, opt, logger):
         return losses.avg, acc
     
     else:
-        mAP = average_precision_score(np.array(all_targets), np.array(all_outputs))
+        mAP = average_precision_score(np.array(all_targets), np.array(all_outputs)) # only consider 5 subclasses
         hemo_ap = average_precision_score(np.array(all_targets)[:, opt.concern_label], np.array(all_outputs)[:, opt.concern_label])
         logger.info(('Testing Results: mAP {0:.4f} ap for hemorrhage {1:.4f} Loss {loss.avg:.5f}'
             .format(mAP, hemo_ap, loss=losses)))
@@ -188,18 +199,19 @@ def evaluate_model(data_loader, model, criterion, opt, logger, concern_label=1):
             data_time.update(time.time() - end_time)
 
             if torch.cuda.is_available():
-                inputs = inputs.cuda()
-                targets = targets[0].unsqueeze(0).cuda()
+                targets = targets.cuda()
+                if opt.model_type == 'mmt':
+                    # use masks as labels: all, internal, external
+                    masks = inputs[1].view((-1, opt.n_channels) + inputs[1].size()[-2:]).cuda()
+                    inputs = inputs[0].cuda()
+                elif opt.model_type == 'mtsn':
+                    inputs = inputs[0].cuda()
+                else:
+                    inputs = inputs.cuda()
 
-            # The outputs are only fc outputs (without softmax)
-            if not opt.model_type == '2d':
-                outputs = model(inputs.view((-1,) + inputs.shape[-4:]))
-                outputs = outputs.view(len(targets), -1, outputs.shape[-1]).mean(dim=1)  # max(dim=1)[0] or mean(dim=1)
-            else: # for 2d: output should be fused into one result
-                outputs = model(inputs.squeeze())
-                outputs = fuse_2d(outputs, thresh=0.025)
-
+            outputs = model(inputs)
             loss = criterion(outputs, targets)
+
             losses.update(loss.item(), inputs.size(0))
             batch_time.update(time.time() - end_time)
             end_time = time.time()

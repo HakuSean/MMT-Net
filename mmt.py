@@ -262,9 +262,9 @@ class CMMT(nn.Module):
         message = [self.branch1(branch_out[0]), self.branch2(branch_out[1])]
 
         # after message passing
-        internal_out = self.base_model.logits(F.relu(message[0] + branch_out[0]))
+        internal_out = self.base_model.logits(F.relu(message[1] + branch_out[0]))
         internal_out = self.last_linear_1(internal_out)
-        external_out = self.base_model.logits(F.relu(message[1] + branch_out[1]))
+        external_out = self.base_model.logits(F.relu(message[0] + branch_out[1]))
         external_out = self.last_linear_2(external_out)
         total_out = self.base_model.logits(F.relu(message[0] + message[1]))
         total_out = self.last_linear_0(total_out)

@@ -144,7 +144,10 @@ class CMMT(nn.Module):
             nn.Conv2d(2048, 1, kernel_size=1, padding=0, bias=True),
             nn.Sigmoid()
             )
-
+        normal_(self.mask_out1[0].weight, 0, std_conv)
+        constant_(self.branch1[0].bias, 0)
+        normal_(self.mask_out2[0].weight, 0, std_conv)
+        constant_(self.branch2[0].bias, 0)
 
         return feature_dim
 
@@ -207,10 +210,14 @@ class CMMT(nn.Module):
         first_conv_bias = []
         normal_weight = []
         normal_bias = []
+        bottleneck_weight = []
+        last_linear_weight = []
+        last_linear_bias = []
         bn = []
 
         conv_cnt = 0
         bn_cnt = 0
+
         for m in self.modules():
             if isinstance(m, torch.nn.Conv2d) or isinstance(m, torch.nn.Conv1d):
                 ps = list(m.parameters())
@@ -219,15 +226,22 @@ class CMMT(nn.Module):
                     first_conv_weight.append(ps[0])
                     if len(ps) == 2:
                         first_conv_bias.append(ps[1])
+                elif m.kernel_size == (1, 1):
+                    bottleneck_weight.append(ps[0])
                 else:
                     normal_weight.append(ps[0])
                     if len(ps) == 2:
                         normal_bias.append(ps[1])
             elif isinstance(m, torch.nn.Linear):
                 ps = list(m.parameters())
-                normal_weight.append(ps[0])
-                if len(ps) == 2:
-                    normal_bias.append(ps[1])
+                if m.out_features <= 3:
+                    last_linear_weight.append(ps[0])
+                    if len(ps) == 2:
+                        last_linear_bias.append(ps[1])
+                else:
+                    normal_weight.append(ps[0])
+                    if len(ps) == 2:
+                        normal_bias.append(ps[1])
                   
             elif isinstance(m, torch.nn.BatchNorm1d):
                 bn.extend(list(m.parameters()))
@@ -244,14 +258,20 @@ class CMMT(nn.Module):
         return [
             {'params': first_conv_weight, 'lr_mult': 1, 'decay_mult': 1,
              'name': "first_conv_weight"},
-            {'params': first_conv_bias, 'lr_mult': 1, 'decay_mult': 1,
+            {'params': first_conv_bias, 'lr_mult': 1, 'decay_mult': 0,
              'name': "first_conv_bias"},
             {'params': normal_weight, 'lr_mult': 1, 'decay_mult': 1,
              'name': "normal_weight"},
-            {'params': normal_bias, 'lr_mult': 1, 'decay_mult': 1,
+            {'params': normal_bias, 'lr_mult': 1, 'decay_mult': 0,
              'name': "normal_bias"},
             {'params': bn, 'lr_mult': 1, 'decay_mult': 0,
              'name': "BN scale/shift"},
+            {'params': bottleneck_weight, 'lr_mult': 1, 'decay_mult': 1,
+             'name': "bottleneck_weight"},
+            {'params': last_linear_weight, 'lr_mult': 1, 'decay_mult': 1,
+             'name': "last_linear_weight"},
+            {'params': last_linear_bias, 'lr_mult': 1, 'decay_mult': 0,
+             'name': "last_linear_bias"},
         ]
 
         # return [
@@ -265,6 +285,12 @@ class CMMT(nn.Module):
         #      'name': "normal_bias"},
         #     {'params': bn, 'lr_mult': 1, 'decay_mult': 0,
         #      'name': "BN scale/shift"},
+        #     {'params': bottleneck_weight, 'lr_mult': 10, 'decay_mult': 1,
+        #      'name': "bottleneck_weight"},
+        #     {'params': last_linear_weight, 'lr_mult': 2, 'decay_mult': 1,
+        #      'name': "last_linear_weight"},
+        #     {'params': last_linear_bias, 'lr_mult': 2, 'decay_mult': 0,
+        #      'name': "last_linear_bias"},
         # ]
 
     def forward(self, input):

@@ -313,6 +313,10 @@ if __name__ == '__main__':
         if epoch % args.eval_freq == 0 or epoch == args.n_epochs - 1:
 
             val_loss, val_acc = val_epoch(epoch, val_loader, model, criterion, args, val_logger)
+            # save checkpoint at step
+            if epoch in args.lr_steps and not epoch == 0:
+                print('Save file at step point..')
+                save_file_path = os.path.join(outpath, 'save_{}.pth'.format(epoch))
 
             # save two models according to loss or accuracy
             if val_loss < best_loss:

@@ -48,7 +48,7 @@ def train_epoch(epoch, data_loader, model, criterion, optimizer, opt, logger):
         
         if opt.model_type == 'mmt':
             outputs, branch_out = model(inputs)
-            loss = criterion(outputs, targets) + dice_loss(branch_out[0], masks[:, 1]) + dice_loss(branch_out[1], masks[:, 2])
+            loss = criterion(outputs, targets).mean() + dice_loss(branch_out[0], masks[:, 1]) + dice_loss(branch_out[1], masks[:, 2])
         else:
             outputs = model(inputs)
             loss = criterion(outputs, targets)
@@ -139,7 +139,7 @@ def val_epoch(epoch, data_loader, model, criterion, opt, logger):
             
             if opt.model_type == 'mmt':
                 outputs, branch_out = model(inputs)
-                loss = criterion(outputs, targets) + dice_loss(branch_out[0], masks[:, 1]) + dice_loss(branch_out[1], masks[:, 2])
+                loss = criterion(outputs, targets).mean() + dice_loss(branch_out[0], masks[:, 1]) + dice_loss(branch_out[1], masks[:, 2])
             else:
                 outputs = model(inputs)
                 loss = criterion(outputs, targets)

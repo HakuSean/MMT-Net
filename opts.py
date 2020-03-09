@@ -79,7 +79,7 @@ def parse_opts():
                         help='(resnet | preresnet | wideresnet | resnext | densenet | BNInception | svm')
     parser.add_argument('--model_depth', type=int, default=18,
                         help='Depth of resnet (10 | 18 | 34 | 50 | 101)')
-    parser.add_argument('--model_type', type=str, default='3d', choices=['3d', 'tsn', '2d', 'mmt', 'mtsn'],
+    parser.add_argument('--model_type', type=str, default='3d', choices=['3d', 'tsn', '2d', 'mmt', 'mtsn', 'chmmt'],
                         help='Type of model. When 2d and tsn, model will use pretrained weights from ImageNet.')
     parser.add_argument('--resnet_shortcut', type=str, default='B',
                         help='Shortcut type of resnet (A | B)')

@@ -84,7 +84,7 @@ if __name__ == '__main__':
         model, parameters = generate_3d(args)
     elif 'tsn' in args.model_type:
         model, parameters = generate_tsn(args)
-    elif args.model_type == 'mmt' :
+    elif 'mmt' in args.model_type:
         model, parameters = generate_mmt(args)
     elif args.model_type == '2d':
         model = generate_2d(args)

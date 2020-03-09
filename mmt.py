@@ -16,7 +16,8 @@ def generate_mmt(args):
     model = CMMT(args.n_classes, args.n_slices,
                 base_model=base_name, 
                 channels=args.n_channels, 
-                fusion_type=args.fusion_type, dropout=args.dropout, 
+                fusion_type=args.fusion_type if not args.model_type == 'chmmt' else None, 
+                dropout=args.dropout, 
                 pretrained=args.pretrain_path,
                 partial_bn=not args.no_partialbn,
                 attention_size=getattr(args, 'attention_size', 0),
@@ -54,7 +55,7 @@ class CMMT(nn.Module):
         self.channels = channels
         self.num_segments = num_segments
         self.before_softmax = before_softmax
-        self.reshape = not fusion_type == 'att'
+        self.reshape = not fusion_type == 'att' and fusion_type is not None
         self.dropout = dropout
         self.pretrained = pretrained
         if not before_softmax and fusion_type != 'avg':
@@ -74,8 +75,9 @@ class CMMT(nn.Module):
 
         feature_dim = self._prepare_cmmt(num_class) # initialize the last layer
 
-        # print("Converting the ImageNet model to a CMMT init model")
-        # self.base_model = self._construct_ct_model(self.base_model)
+        if fusion_type is None:
+            print("Converting the ImageNet model to a CMMT init model")
+            self.base_model = self._construct_ct_model(self.base_model)
         print("Done. CMMT model ready...")
 
         # special operations
@@ -195,7 +197,7 @@ class CMMT(nn.Module):
                 if isinstance(m, nn.BatchNorm2d):
                     count += 1
                     if count >= (2 if self._enable_pbn else 1):
-                        m.eval()
+                        m.eval().half()
 
                         # shutdown update in frozen mode
                         m.weight.requires_grad = False
@@ -295,7 +297,10 @@ class CMMT(nn.Module):
 
     def forward(self, input):
         # sample_len = 2 * self.new_length # here 2 means flow_x and flow_y, 3 for RGB
-        branch_out = self.base_model(input.view((-1, self.channels) + input.size()[-2:]))
+        if self.consensus is None:
+            branch_out = self.base_model(input.view((-1, self.channels * self.num_segments) + input.size()[-2:]))
+        else:
+            branch_out = self.base_model(input.view((-1, self.channels) + input.size()[-2:]))
         message = [self.branch1(branch_out[0]), self.branch2(branch_out[1])]
         mask_out = [self.mask_out1(branch_out[0]), self.mask_out2(branch_out[1])]
 
@@ -321,6 +326,8 @@ class CMMT(nn.Module):
             external_out = external_out.view((-1, self.num_segments) + external_out.size()[1:])
             total_out = total_out.view((-1, self.num_segments) + total_out.size()[1:])
             base_out = torch.cat((total_out, internal_out, external_out), 2).cuda()
+        else:
+            base_out = torch.cat((total_out, internal_out, external_out), 1).cuda()
             # print(base_out.shape)
 
         # output = self.consensus(base_out)
@@ -348,32 +355,33 @@ class CMMT(nn.Module):
     #     return attn_output
 
 
-    # def _construct_ct_model(self, base_model):
-    #     # modify the convolution layers
-    #     # Torch models are usually defined in a hierarchical way.
-    #     # nn.modules.children() return all sub modules in a DFS manner
-    #     modules = list(self.base_model.modules())
-    #     first_conv_idx = list(filter(lambda x: isinstance(modules[x], nn.Conv2d), list(range(len(modules)))))[0]
-    #     conv_layer = modules[first_conv_idx]
-    #     container = modules[first_conv_idx - 1]
+    def _construct_ct_model(self, base_model):
+        # modify the convolution layers
+        # Torch models are usually defined in a hierarchical way.
+        # nn.modules.children() return all sub modules in a DFS manner
+        modules = list(self.base_model.modules())
+        first_conv_idx = list(filter(lambda x: isinstance(modules[x], nn.Conv2d), list(range(len(modules)))))[0]
+        conv_layer = modules[first_conv_idx]
+        container = modules[first_conv_idx - 1]
 
-    #     # modify parameters, assume the first blob contains the convolution kernels
-    #     params = [x.clone() for x in conv_layer.parameters()] # len=1 when there is no bias, otherwise the length should be 2.
-    #     kernel_size = params[0].size()
-    #     new_kernel_size = kernel_size[:1] + (1 * self.channels, ) + kernel_size[2:] # add amone different lists, in that case, kernel_size[0] and kernel_size[2:] are kept unchanged. Only change kernel_size[1]
-    #     new_kernels = params[0].data.mean(dim=1, keepdim=True).expand(new_kernel_size).contiguous()
+        # modify parameters, assume the first blob contains the convolution kernels
+        params = [x.clone() for x in conv_layer.parameters()] # len=1 when there is no bias, otherwise the length should be 2.
+        kernel_size = params[0].size()
+        new_kernel_size = kernel_size[:1] + (self.num_segments * self.channels, ) + kernel_size[2:] # add amone different lists, in that case, kernel_size[0] and kernel_size[2:] are kept unchanged. Only change kernel_size[1]
+        # new_kernels = params[0].data.mean(dim=1, keepdim=True).expand(new_kernel_size).contiguous()
+        new_kernels = params[0].data.repeat(1, self.num_segments, 1, 1).contiguous()
 
-    #     new_conv = nn.Conv2d(1 * self.channels, conv_layer.out_channels,
-    #                          conv_layer.kernel_size, conv_layer.stride, conv_layer.padding,
-    #                          bias=True if len(params) == 2 else False)
-    #     new_conv.weight.data = new_kernels
-    #     if len(params) == 2:
-    #         new_conv.bias.data = params[1].data # add bias if neccessary
-    #     layer_name = list(container.state_dict().keys())[0][:-7] # remove .weight suffix to get the layer name
+        new_conv = nn.Conv2d(self.num_segments * self.channels, conv_layer.out_channels,
+                             conv_layer.kernel_size, conv_layer.stride, conv_layer.padding,
+                             bias=True if len(params) == 2 else False)
+        new_conv.weight.data = new_kernels
+        if len(params) == 2:
+            new_conv.bias.data = params[1].data # add bias if neccessary
+        layer_name = list(container.state_dict().keys())[0][:-7] # remove .weight suffix to get the layer name
 
-    #     # replace the first convlution layer
-    #     setattr(container, layer_name, new_conv)
-    #     return base_model
+        # replace the first convlution layer
+        setattr(container, layer_name, new_conv)
+        return base_model
 
     @property
     def crop_size(self):

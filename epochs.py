@@ -41,12 +41,17 @@ def train_epoch(epoch, data_loader, model, criterion, optimizer, opt, logger):
                 # use masks as labels: all, internal, external
                 masks = F.interpolate(inputs[1].view((-1, opt.n_channels) + inputs[1].size()[-2:]).cuda(), size=[inputs[1].size()[-1]//32, inputs[1].size()[-1]//32])
                 inputs = inputs[0].cuda()
+            elif opt.model_type == 'chmmt':
+                # use masks as labels: all, internal, external
+                masks = inputs[1].mean(axis=1).cuda()
+                masks = (F.interpolate(masks, size=[inputs[1].size()[-1]//32, inputs[1].size()[-1]//32]) > 1/6).to(torch.float).cuda()
+                inputs = inputs[0].cuda()
             elif opt.model_type == 'mtsn':
                 inputs = inputs[0].cuda()
             else:
                 inputs = inputs.cuda()
         
-        if opt.model_type == 'mmt':
+        if opt.model_type == 'mmt' or opt.model_type == 'chmmt':
             outputs, branch_out = model(inputs)
             loss = criterion(outputs, targets).mean() + dice_loss(branch_out[0], masks[:, 1]) + dice_loss(branch_out[1], masks[:, 2])
         else:
@@ -132,12 +137,17 @@ def val_epoch(epoch, data_loader, model, criterion, opt, logger):
                     # use masks as labels: all, internal, external
                     masks = F.interpolate(inputs[1].view((-1, opt.n_channels) + inputs[1].size()[-2:]).cuda(), size=[inputs[1].size()[-1]//32, inputs[1].size()[-1]//32])
                     inputs = inputs[0].cuda()
+                elif opt.model_type == 'chmmt':
+                    # use masks as labels: all, internal, external
+                    masks = inputs[1].mean(axis=1).cuda()
+                    masks = (F.interpolate(masks, size=[inputs[1].size()[-1]//32, inputs[1].size()[-1]//32]) > 1/6).to(torch.float).cuda()
+                    inputs = inputs[0].cuda()
                 elif opt.model_type == 'mtsn':
                     inputs = inputs[0].cuda()
                 else:
                     inputs = inputs.cuda()
             
-            if opt.model_type == 'mmt':
+            if opt.model_type == 'mmt' or opt.model_type == 'chmmt':
                 outputs, branch_out = model(inputs)
                 loss = criterion(outputs, targets).mean() + dice_loss(branch_out[0], masks[:, 1]) + dice_loss(branch_out[1], masks[:, 2])
             else:

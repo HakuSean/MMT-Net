@@ -11,16 +11,17 @@ import time
 import torch
 from torch import nn
 from torchvision import transforms
-from sklearn.metrics import confusion_matrix, roc_auc_score
+from sklearn.metrics import confusion_matrix, roc_auc_score, average_precision_score
 
 from utils import *
 from ctdataset import CTDataSet
 from epochs import evaluate_model
 from opts import parse_opts
 
-from model2d import generate_2d
+# from model2d import generate_2d
 from model3d import generate_3d
 from tsnmodel import generate_tsn
+from mmt import generate_mmt
 from spatial_transforms import *
 from temporal_transforms import *
 
@@ -49,9 +50,9 @@ if __name__ == '__main__':
         args.tag = '_' + args.tag
 
     # input label files or one single case
-    if os.path.exists(os.path.join(args.annotation_path, 'validation_' + args.dataset + '.txt')):
-        eval_list = os.path.join(args.annotation_path, 'validation_' + args.dataset + '.txt')
-        outpath = os.path.join(args.result_path, 'split_' + args.dataset + args.tag)
+    if os.path.exists(os.path.join(args.annotation_path + args.dataset, 'validation_' + args.split + '.txt')):
+        eval_list = os.path.join(args.annotation_path + args.dataset, 'validation_' + args.split + '.txt')
+        outpath = os.path.join(args.result_path, args.dataset + 'split_' + args.split + args.tag)
 
     elif ' ' in args.dataset or os.path.exists(args.dataset):
         eval_list = args.dataset # one single case
@@ -102,16 +103,19 @@ if __name__ == '__main__':
         snap_opts.input_format = args.input_format
         snap_opts.modality = getattr(args, 'modality', 'soft')
         snap_opts.arch = arch = checkpoint.get('arch', args.model)
-        snap_opts.no_postop = getattr(snap_opts, 'no_postop', args.no_postop)
         snap_opts.pretrain_path = False # do not have to use pretrained in evaluation/test
 
         # load model
         if snap_opts.model_type == '3d':
-            model, _ = generate_3d(snap_opts)
-        elif snap_opts.model_type == 'tsn':
-            model, _ = generate_tsn(snap_opts)
+            model, parameters = generate_3d(snap_opts)
+        elif 'tsn' in snap_opts.model_type:
+            model, parameters = generate_tsn(snap_opts)
+        elif 'mmt' in snap_opts.model_type:
+            model, parameters = generate_mmt(snap_opts)
+        elif snap_opts.model_type == '2d':
+            model = generate_2d(snap_opts)
         else:
-            model, snap_opts = generate_2d(snap_opts)
+            raise ValueError("Unknown model type")
 
         # load model states
         model = nn.DataParallel(model)
@@ -120,9 +124,14 @@ if __name__ == '__main__':
         # -----------------------------------
         # --- Prepare data ------------------
         # -----------------------------------
+        # define spatial and temporal transform
+        if 'mt' in snap_opts.model_type:
+            compose = MaskCompose
+        else:
+            compose = transforms.Compose
 
         # prepare normalization method
-        if snap_opts.model_type == '3d' or snap_opts.model_type == 'tsn':
+        if not snap_opts.model_type == '2d':
             if snap_opts.no_mean_norm and not snap_opts.std_norm:
                 norm_method = GroupNormalize([0.], [1.])
             elif not snap_opts.std_norm:
@@ -133,15 +142,16 @@ if __name__ == '__main__':
             # get input_size other wise use the sample_size
             crop_size = getattr(model.module, 'input_size', snap_opts.sample_size)
 
-            spatial_transform = transforms.Compose([
+            spatial_transform = compose([
                 # GroupResize(snap_opts.sample_size if 'inception' in snap_opts.model and snap_opts.sample_size >= 300 else 512),
                 GroupResize(crop_size),
+                GroupCenterCrop(crop_size),
                 # GroupFiveCrop(crop_size)
                 ToTorchTensor(snap_opts.model_type, norm=norm_value, caffe_pretrain=snap_opts.arch == 'bninception'),
                 norm_method,
                 ])
         else:
-            spatial_transform = transforms.Compose([
+            spatial_transform = compose([
                 GroupResize(snap_opts.sample_size),
                 GroupCenterCrop(snap_opts.sample_size),
                 ToTorchTensor(snap_opts.model_type),
@@ -158,7 +168,6 @@ if __name__ == '__main__':
             shuffle=False,
             num_workers=args.n_threads,
             pin_memory=True)
-
 
         # load scores if predicted:
         if os.path.isfile(os.path.join(outpath, 'pred_{}.npy'.format(score_file))):
@@ -189,7 +198,6 @@ if __name__ == '__main__':
     # --- Post-process Score ------------
     # -----------------------------------
     # score_aggregation
-    HEMO, POST = 1, 2
     final_scores = np.zeros_like(scores)
 
     if args.fusion_type == 'avg':
@@ -200,47 +208,37 @@ if __name__ == '__main__':
         for score_id, score_value in enumerate(zip(*score_lists)):
             final_scores[score_id] = 1/ (1+ np.exp(-np.array(score_value).max(axis=0)))
 
-    # specific for rsna and xnat
-    if not args.subset:
-        index = list(range(len(eval_data)))
-    elif args.subset == 'rsna':
-        index = [i for i in range(len(eval_data)) if 'ID_' in eval_data.ct_list[i].path]
-    elif args.subset == 'xnat':
-        index = [i for i in range(len(eval_data)) if 'ct_soft' in eval_data.ct_list[i].path]
-
     # calculate accuracy
-    if args.no_postop:
-        ground_truth = np.array([int(record.label[HEMO]) for record in eval_data.ct_list])[index]
-    else:
-        ground_truth = np.array([int(record.label[HEMO] and not record.label[POST]) for record in eval_data.ct_list])[index]
-
-    eval_logger.info('Use >={} for label 1 (usually hemorrhage).'.format(args.threshold))
+    ground_truth = np.array([record.label for record in eval_data.ct_list]).astype(np.int)
+    eval_logger.info('Use >={} for positive.'.format(args.threshold))
 
     # max vote for cq500 (in total 490 cases):
     if 'cq500' in args.dataset:
-        ground_truth, pred_labels, pred_scores = case_vote(args.dataset, ground_truth, final_scores[index, HEMO], args.threshold, majority=True)
+        ground_truth, pred_labels, pred_scores = case_vote(args.dataset, ground_truth, final_scores[:, 1], args.threshold, majority=True)
     else:
-        if args.no_postop:
-            pred_scores = final_scores[index, HEMO]
-            pred_labels = np.array([int(i[HEMO] >= args.threshold) for i in final_scores])
-        else:
-            pred_scores = final_scores[index, HEMO] - final_scores[index, POST]
-            pred_labels = np.array([int(i[HEMO] >= args.threshold and i[HEMO] - i[POST] >= 0.2) for i in final_scores])
+        mAP = average_precision_score(ground_truth, final_scores) # to check whether they are correct 
+        eval_logger.info('mean average precision:\t{:.4f}'.format(mAP))
 
-    acc = (ground_truth == pred_labels).sum() / len(ground_truth)
-    
-    measures = f1_score(pred_labels, ground_truth, compute=args.concern_label)
+        for index in range(1, final_scores.shape[1]):
+            # if index == 1:
+            #     pred_scores = np.array([max(score[1:]) if score[1] < args.threshold else score[1] for score in final_scores ])
+            # else:
+            pred_scores = final_scores[:, index]
 
-    if args.subset:
-        eval_logger.info('Result for dataset {}'.format(args.subset))
+            pred_labels = np.array([int(i >= args.threshold) for i in pred_scores])
 
-    eval_logger.info('Final Precision (tp/tp+fp):\t{:.3f}'.format(measures[0]))
-    eval_logger.info('Final Recall (tp/tp+fn):\t{:.3f}'.format(measures[1]))
-    eval_logger.info('Final F1-measure (2pr/p+r):\t{:.3f}'.format(measures[2]))
-    eval_logger.info('Final Sensitivity (tp/tp+fn):\t{:.3f}'.format(measures[1]))
-    eval_logger.info('Final Specificity (tn/tn+fp):\t{:.3f}'.format(measures[3]))
-    eval_logger.info('Final Accuracy (tn+tp/all):\t{:.03f}%'.format(acc * 100))
-    eval_logger.info("AUC Score (Test): %f" % roc_auc_score(ground_truth, pred_scores))
+            acc = (ground_truth[:, index] == pred_labels).sum() / len(ground_truth)
+            
+            measures = f1_score(pred_labels, ground_truth[:, index], compute=args.concern_label)
+
+            eval_logger.info('Final Precision (tp/tp+fp):\t{:.4f}'.format(measures[0]))
+            eval_logger.info('Final Recall (tp/tp+fn):\t{:.4f}'.format(measures[1]))
+            eval_logger.info('Final F1-measure (2pr/p+r):\t{:.4f}'.format(measures[2]))
+            eval_logger.info('Final Sensitivity (tp/tp+fn):\t{:.4f}'.format(measures[1]))
+            eval_logger.info('Final Specificity (tn/tn+fp):\t{:.4f}'.format(measures[3]))
+            eval_logger.info('Final Accuracy (tn+tp/all):\t{:.04f}%'.format(acc * 100))
+            eval_logger.info('Average Precision: \t{:.4f}'.format(average_precision_score(ground_truth[:, index], pred_scores)))
+            eval_logger.info("AUC Score (Test): %f" % roc_auc_score(ground_truth[:, index], pred_scores))
 
     # -----------------------------------
     # --- Analysis Results --------------

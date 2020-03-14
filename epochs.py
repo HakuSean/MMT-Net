@@ -50,7 +50,7 @@ def train_epoch(epoch, data_loader, model, criterion, optimizer, opt, logger):
                 inputs = inputs[0].cuda()
             else:
                 inputs = inputs.cuda()
-        
+
         if opt.model_type == 'mmt' or opt.model_type == 'chmmt':
             outputs, branch_out = model(inputs)
             loss = criterion(outputs, targets).mean() + dice_loss(branch_out[0], masks[:, 1]) + dice_loss(branch_out[1], masks[:, 2])
@@ -212,15 +212,26 @@ def evaluate_model(data_loader, model, criterion, opt, logger, concern_label=1):
                 targets = targets.cuda()
                 if opt.model_type == 'mmt':
                     # use masks as labels: all, internal, external
-                    masks = inputs[1].view((-1, opt.n_channels) + inputs[1].size()[-2:]).cuda()
+                    masks = F.interpolate(inputs[1].view((-1, opt.n_channels) + inputs[1].size()[-2:]).cuda(), size=[7, 7])
+                    inputs = inputs[0].cuda()
+                elif opt.model_type == 'chmmt':
+                    # use masks as labels: all, internal, external
+                    masks = inputs[1].mean(axis=1).cuda()
+                    masks = (F.interpolate(masks, size=[inputs[1].size()[-1]//32, inputs[1].size()[-1]//32]) > 1/6).to(torch.float).cuda()
                     inputs = inputs[0].cuda()
                 elif opt.model_type == 'mtsn':
                     inputs = inputs[0].cuda()
                 else:
                     inputs = inputs.cuda()
+            
+            if opt.model_type == 'mmt' or opt.model_type == 'chmmt':
+                outputs, branch_out = model(inputs)
+                loss = criterion(outputs, targets).mean() + dice_loss(branch_out[0], masks[:, 1]) + dice_loss(branch_out[1], masks[:, 2])
+            else:
+                outputs = model(inputs)
+                loss = criterion(outputs, targets)
 
-            outputs = model(inputs)
-            loss = criterion(outputs, targets)
+            outputs = outputs.view(len(targets), -1, outputs.shape[-1]).mean(dim=1)  # max(dim=1)[0] or mean(dim=1)
 
             losses.update(loss.item(), inputs.size(0))
             batch_time.update(time.time() - end_time)

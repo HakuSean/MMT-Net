@@ -218,8 +218,9 @@ if __name__ == '__main__':
     else:
         mAP = average_precision_score(ground_truth, final_scores) # to check whether they are correct 
         eval_logger.info('mean average precision:\t{:.4f}'.format(mAP))
+        starting = 0 if 'rsna' in args.dataset else 1
 
-        for index in range(1, final_scores.shape[1]):
+        for index in range(starting, final_scores.shape[1]):
             # if index == 1:
             #     pred_scores = np.array([max(score[1:]) if score[1] < args.threshold else score[1] for score in final_scores ])
             # else:

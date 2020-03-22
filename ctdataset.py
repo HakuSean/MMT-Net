@@ -228,7 +228,8 @@ class CTDataSet(data.Dataset):
         output[:, :, 0] = img
 
         # calculate two masks
-        internal = cv2.morphologyEx(img, cv2.MORPH_ERODE, erode_kernel)
+        internal = cv2.morphologyEx(img, cv2.MORPH_CLOSE, erode_kernel)
+        internal = cv2.morphologyEx(internal, cv2.MORPH_ERODE, erode_kernel)
         external = cv2.morphologyEx(internal, cv2.MORPH_DILATE, erode_kernel) - internal
         external = cv2.morphologyEx(external, cv2.MORPH_DILATE, dilate_kernel)
 

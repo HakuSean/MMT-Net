@@ -15,7 +15,7 @@ from sklearn.metrics import confusion_matrix, roc_auc_score, average_precision_s
 
 from utils import *
 from ctdataset import CTDataSet
-from epochs import evaluate_model
+from epochs import evaluate_model, evaluate_cam_model
 from opts import parse_opts
 
 # from model2d import generate_2d
@@ -73,6 +73,7 @@ if __name__ == '__main__':
     eval_logger.info('Initial Definition time: {}'.format(time.time() - start))
 
     score_lists = list()
+    mask_lists = None
 
     # prepare for value range
     if args.input_format == 'jpg':
@@ -87,7 +88,6 @@ if __name__ == '__main__':
     # ===================================
     # --- Each model --------------------
     # ===================================
-    
     for checkpoint in args.test_models:
         start = time.time()
         # -----------------------------------
@@ -104,6 +104,8 @@ if __name__ == '__main__':
         snap_opts.modality = getattr(args, 'modality', 'soft')
         snap_opts.arch = arch = checkpoint.get('arch', args.model)
         snap_opts.pretrain_path = False # do not have to use pretrained in evaluation/test
+        snap_opts.n_slices = args.n_slices
+        target_layer_names = ['layer4']
 
         # load model
         if snap_opts.model_type == '3d':
@@ -133,11 +135,11 @@ if __name__ == '__main__':
         # prepare normalization method
         if not snap_opts.model_type == '2d':
             if snap_opts.no_mean_norm and not snap_opts.std_norm:
-                norm_method = GroupNormalize([0.], [1.])
+                norm_method = GroupNormalize([0.], [1.], cuda=torch.cuda.is_available() and args.use_cam)
             elif not snap_opts.std_norm:
-                norm_method = GroupNormalize(model.module.input_mean, [1.]) # by default
+                norm_method = GroupNormalize(model.module.input_mean, [1.], cuda=torch.cuda.is_available() and args.use_cam) # by default
             else:
-                norm_method = GroupNormalize(model.module.input_mean, model.module.input_std) # the model is already wrapped by DataParalell
+                norm_method = GroupNormalize(model.module.input_mean, model.module.input_std, cuda=torch.cuda.is_available() and args.use_cam) # the model is already wrapped by DataParalell
 
             # get input_size other wise use the sample_size
             crop_size = getattr(model.module, 'input_size', snap_opts.sample_size)
@@ -148,8 +150,9 @@ if __name__ == '__main__':
                 GroupCenterCrop(crop_size),
                 # GroupFiveCrop(crop_size)
                 ToTorchTensor(snap_opts.model_type, norm=norm_value, caffe_pretrain=snap_opts.arch == 'bninception'),
-                norm_method,
                 ])
+            if not args.use_cam:
+                spatial_transform.transforms.append(norm_method)
         else:
             spatial_transform = compose([
                 GroupResize(snap_opts.sample_size),
@@ -170,11 +173,24 @@ if __name__ == '__main__':
             pin_memory=True)
 
         # load scores if predicted:
+        scores, masks = None, None
         if os.path.isfile(os.path.join(outpath, 'pred_{}.npy'.format(score_file))):
             print('pred_{}.npy has already been predicted'.format(score_file))
             scores = np.load(os.path.join(outpath, 'pred_{}.npy'.format(score_file)))
+
+        if os.path.isfile(os.path.join(outpath, 'mask_{}.npy'.format(score_file))) and args.use_cam:
+            print('mask_{}.npy has already been predicted'.format(score_file))
+            masks = np.load(os.path.join(outpath, 'mask_{}.npy'.format(score_file)))
+
+        if scores is not None:
             score_lists.append(np.array(scores))
-            continue
+
+            if args.use_cam:
+                if masks is not None:
+                    mask_lists = np.array(masks) if mask_lists is None else mask_lists + np.array(masks)
+                    continue
+            else:
+                continue
 
         # -----------------------------------
         # --- prepare criterion -------------
@@ -186,11 +202,20 @@ if __name__ == '__main__':
 
         print('Preparation time for {}-{} is {}'.format(arch, snap_opts.model_type, time.time() - start))
         
-        scores = evaluate_model(eval_loader, model, criterion, snap_opts, eval_logger, concern_label=args.concern_label)
+        if args.use_cam:
+            masks, scores = evaluate_cam_model(eval_loader, model, criterion, snap_opts, eval_logger, norm_method, target_layer_names, concern_label=args.concern_label)
+        else:
+            scores = evaluate_model(eval_loader, model, criterion, snap_opts, eval_logger, concern_label=args.concern_label)
         score_lists.append(np.array(scores))
 
+        if args.use_cam:
+            mask_lists = np.array(masks) if mask_lists is None else mask_lists + np.array(masks)
+
         # save scores for later usage
-        np.save(os.path.join(outpath, 'pred_{}.npy'.format(score_file)), np.array(scores))
+        if not os.path.isfile(os.path.join(outpath, 'pred_{}.npy'.format(score_file))):
+            np.save(os.path.join(outpath, 'pred_{}.npy'.format(score_file)), np.array(scores))
+        if not os.path.isfile(os.path.join(outpath, 'mask_{}.npy'.format(score_file))) and args.use_cam:
+            np.save(os.path.join(outpath, 'mask_{}.npy'.format(score_file)), np.array(masks))
 
         print('Prediction time for {}-{} is {}'.format(arch, snap_opts.model_type, time.time() - start))
 
@@ -199,6 +224,7 @@ if __name__ == '__main__':
     # -----------------------------------
     # score_aggregation
     final_scores = np.zeros_like(scores)
+    hemorrhage_types = ['hemorrhage (ich)', 'iph', 'ivh', 'sah', 'sdh', 'eph']
 
     if args.fusion_type == 'avg':
         for s, w in zip(score_lists, score_weights):
@@ -220,6 +246,9 @@ if __name__ == '__main__':
         eval_logger.info('mean average precision:\t{:.4f}'.format(mAP))
         starting = 0 if 'rsna' in args.dataset else 1
 
+        for model_score in score_lists:
+            print('AUC: \t{:.4f}'.format(roc_auc_score(ground_truth[:, starting], model_score[:, starting])))
+
         for index in range(starting, final_scores.shape[1]):
             # if index == 1:
             #     pred_scores = np.array([max(score[1:]) if score[1] < args.threshold else score[1] for score in final_scores ])
@@ -232,6 +261,7 @@ if __name__ == '__main__':
             
             measures = f1_score(pred_labels, ground_truth[:, index], compute=args.concern_label)
 
+            eval_logger.info('For {}'.format(hemorrhage_types[index-starting]))
             eval_logger.info('Final Precision (tp/tp+fp):\t{:.4f}'.format(measures[0]))
             eval_logger.info('Final Recall (tp/tp+fn):\t{:.4f}'.format(measures[1]))
             eval_logger.info('Final F1-measure (2pr/p+r):\t{:.4f}'.format(measures[2]))
@@ -239,7 +269,10 @@ if __name__ == '__main__':
             eval_logger.info('Final Specificity (tn/tn+fp):\t{:.4f}'.format(measures[3]))
             eval_logger.info('Final Accuracy (tn+tp/all):\t{:.04f}%'.format(acc * 100))
             eval_logger.info('Average Precision: \t{:.4f}'.format(average_precision_score(ground_truth[:, index], pred_scores)))
-            eval_logger.info("AUC Score (Test): %f" % roc_auc_score(ground_truth[:, index], pred_scores))
+            try:
+                eval_logger.info("AUC Score (Test): %f" % roc_auc_score(ground_truth[:, index], pred_scores))
+            except:
+                eval_logger.info("AUC Score (Test): nan (only positive or negative cases)")
 
     # -----------------------------------
     # --- Analysis Results --------------
@@ -247,17 +280,31 @@ if __name__ == '__main__':
 
     # prepare false_alarm and missed cases
     if args.analysis:
-        false_alarm = ['line\tid\t\tscores (hemo, postop)']
-        missed = ['line\tid\t\tscores (hemo, postop)']
+        false_alarm = ['line\tid\t\tscores (hemo vs non, subtypes)']
+        missed = ['line\tid\t\tscores (hemo vs non, subtypes)']
+        pred_scores = final_scores[:, starting]
+        pred_labels = np.array([int(i >= args.threshold) for i in pred_scores])
 
         for i in range(len(ground_truth)):
-            if not ground_truth[i] and pred_labels[i]:
-                false_alarm.append('{}\t{}\t[{:.4f} {:.4f}]'.format(
-                    i+1, eval_data.ct_list[i].path.split('/')[-1], final_scores[i][HEMO], final_scores[i][POST]))
+            if not ground_truth[i][starting] and pred_labels[i]:
+                false_alarm.append('{}\t{}\t[{:.4f} {:.4f}] {}'.format(
+                    i+1, eval_data.ct_list[i].path.split('/')[-1], final_scores[i][starting], final_scores[i][2], final_scores[i][-5:]))
 
-            if ground_truth[i] and not pred_labels[i]:
-                missed.append('{}\t{}\t[{:.4f} {:.4f}]'.format(
-                    i+1, eval_data.ct_list[i].path.split('/')[-1], final_scores[i][HEMO], final_scores[i][POST]))
+                # prepare image for printout:
+                if args.use_cam:
+                    img, _, path = eval_data[i]
+                    mask = mask_lists[i]
+                    show_cam_on_image(img[:, 0].unsqueeze(dim=3).repeat(1,1,1,3).numpy(), mask / len(args.test_models), os.path.join(outpath, path))
+
+            if ground_truth[i][1] and not pred_labels[i]:
+                missed.append('{}\t{}\t[{:.4f} {:.4f}] {}'.format(
+                    i+1, eval_data.ct_list[i].path.split('/')[-1], final_scores[i][starting], final_scores[i][2], final_scores[i][-5:]))
+
+                # prepare image for printout:
+                if args.use_cam:
+                    img, _, path = eval_data[i]
+                    mask = mask_lists[i]
+                    show_cam_on_image(img[:, 0].unsqueeze(dim=3).repeat(1,1,1,3).numpy(), mask / len(args.test_models), os.path.join(outpath, path))
 
         # print
         eval_logger.info('\nFalse alarms: ')

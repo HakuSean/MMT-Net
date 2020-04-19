@@ -159,6 +159,8 @@ def parse_opts():
                         help='Threshold used for accuracy. Only used in Test.')
     parser.add_argument('--subset', type=str, default=None, choices=['imed', 'rsna'],
                         help='Select to print out results for specific subset. (Default: both)')
+    parser.add_argument('--use_cam', action='store_true', default=False,
+                        help='Use calculated CAM mask to predict yes/no. Default False')
 
     args = parser.parse_args()
 

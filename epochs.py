@@ -8,7 +8,7 @@ import ipdb
 
 from utils import AverageMeter, calculate_accuracy, f1_score, fuse_2d, grad_cam, show_cam_on_image, ModelOutputs
 import numpy as np
-from sklearn.metrics import average_precision_score
+from sklearn.metrics import average_precision_score, roc_auc_score
 from utils import DiceLoss
 
 from apex import amp
@@ -238,7 +238,7 @@ def evaluate_model(data_loader, model, criterion, opt, logger, concern_label=1):
             end_time = time.time()
 
             gt = int(targets[0][opt.concern_label].item())
-            pred = 1 if outputs[0][opt.concern_label].item() > 0 else 0
+            pred = 1 if 1 / (1 + np.exp(-1 * outputs[0][opt.concern_label].item())) > opt.threshold else 0 # use sigmoid
 
             logger.info(
                 'Case: [{0}/{1}]\t'
@@ -267,11 +267,14 @@ def evaluate_model(data_loader, model, criterion, opt, logger, concern_label=1):
 
         precision, recall, F1, specificity = f1_score(outputs_label, targets_label, compute=concern_label)
 
-    logger.info('Model {}-{}: Precision (tp/tp+fp):\t{:.3f}'.format(opt.arch, opt.model_type, precision))
-    logger.info('Model {}-{}: Recall (tp/tp+fn):\t{:.3f}'.format(opt.arch, opt.model_type, recall))
-    logger.info('Model {}-{}: F1-measure (2pr/p+r):\t{:.3f}'.format(opt.arch, opt.model_type, F1))
-    logger.info('Model {}-{}: Sensitivity (tp/tp+fn):\t{:.3f}'.format(opt.arch, opt.model_type, recall))
-    logger.info('Model {}-{}: Specificity (tn/tn+fp):\t{:.3f}'.format(opt.arch, opt.model_type, specificity))
+    hemo_scores = np.array([1 / (1 + np.exp(-1 * i[1])) for i in outputs_score])
+
+    logger.info('Model {}-{}: Precision (tp/tp+fp):\t{:.4f}'.format(opt.arch, opt.model_type, precision))
+    logger.info('Model {}-{}: Recall (tp/tp+fn):\t{:.4f}'.format(opt.arch, opt.model_type, recall))
+    logger.info('Model {}-{}: F1-measure (2pr/p+r):\t{:.4f}'.format(opt.arch, opt.model_type, F1))
+    logger.info('Model {}-{}: Sensitivity (tp/tp+fn):\t{:.4f}'.format(opt.arch, opt.model_type, recall))
+    logger.info('Model {}-{}: Specificity (tn/tn+fp):\t{:.4f}'.format(opt.arch, opt.model_type, specificity))
+    logger.info('Model {}-{}: AUC: \t{:.4f}'.format(opt.arch, opt.model_type,roc_auc_score(targets_label, hemo_scores)))
 
     return outputs_score
 
@@ -304,5 +307,98 @@ def predict(data_loader, model, norm_method, target_layer_names, concern_label=1
         # release cuda memory
         torch.cuda.empty_cache()
         del mask, score, inputs
+
+    return np.array(masks), outputs_score
+
+def evaluate_cam_model(data_loader, model, criterion, opt, logger, norm_method, target_layer_names, concern_label=1):
+    # batch_size should always be one.
+    model.eval()
+
+    batch_time = AverageMeter()
+    data_time = AverageMeter()
+    losses = AverageMeter()
+
+    if not getattr(model, 'module', None): # consider with/without dataparallel
+        extractor = ModelOutputs(model, target_layer_names)
+    else:
+        extractor = ModelOutputs(model.module, target_layer_names)
+
+    end_time = time.time()
+
+    outputs_score = []
+    outputs_label = []
+    targets_label = []
+    masks = list()
+
+    for i, (inputs, targets, path) in enumerate(data_loader): # each time only read one instance
+        data_time.update(time.time() - end_time)
+
+        if torch.cuda.is_available():
+            inputs = inputs.cuda()
+            targets = targets.cuda()
+
+        # The outputs are only fc outputs (without softmax)
+        if not opt.model_type == '2d':
+            if not opt.use_cam:
+                with torch.no_grad():
+                    outputs = model(inputs)
+                    outputs = outputs.view(len(targets), -1, outputs.shape[-1]).mean(dim=1)  # max(dim=1)[0] or mean(dim=1)
+            else:
+                mask, outputs = grad_cam(target_layer_names, extractor, norm_method(inputs.squeeze()), index=concern_label)
+        else: # for 2d: output should be fused into one result
+            with torch.no_grad():
+                outputs = model(inputs.squeeze())
+                outputs = fuse_2d(outputs, thresh=0.025)
+
+        loss = criterion(outputs, targets)
+        losses.update(loss.item(), inputs.size(0))
+        batch_time.update(time.time() - end_time)
+        end_time = time.time()
+        if opt.use_cam:
+            masks.append(mask)
+
+        gt = int(targets[0][opt.concern_label].item())
+        pred = 1 if 1 / (1 + np.exp(-1 * outputs[0][opt.concern_label].item())) > 0.35 else 0
+
+        logger.info(
+            'Case: [{0}/{1}]\t'
+            'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+            'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
+            'Loss {2:4f} ({losses.avg:.3f})\t'
+            'Acc {3} (gt {4}, score {5:.4f})\t'
+            'Name {6}'.format(
+            i + 1,
+            len(data_loader),
+            loss.item(),
+            int(pred == gt), gt, outputs[0][1].item(),
+            path[0],
+            batch_time=batch_time,
+            data_time=data_time,
+            losses=losses))
+
+        # get hemorrage results
+        outputs_label.append(pred)
+        targets_label.append(int(targets[0][1].item()))
+        outputs_score.append([round(s.item(), 4) for s in outputs.cpu()[0]])
+
+        # release cuda memory
+        if opt.use_cam:
+            torch.cuda.empty_cache()
+            del mask, outputs, inputs
+
+        # # select out the bad
+        # if not outputs_label[-1] == targets_label[-1]:
+        #     bad_index.append(i)
+
+    precision, recall, F1, specificity = f1_score(outputs_label, targets_label, compute=concern_label)
+
+    hemo_scores = np.array([1 / (1 + np.exp(-1 * i[1])) for i in outputs_score])
+
+    logger.info('Model {}-{}: Precision (tp/tp+fp):\t{:.4f}'.format(opt.arch, opt.model_type, precision))
+    logger.info('Model {}-{}: Recall (tp/tp+fn):\t{:.4f}'.format(opt.arch, opt.model_type, recall))
+    logger.info('Model {}-{}: F1-measure (2pr/p+r):\t{:.4f}'.format(opt.arch, opt.model_type, F1))
+    logger.info('Model {}-{}: Sensitivity (tp/tp+fn):\t{:.4f}'.format(opt.arch, opt.model_type, recall))
+    logger.info('Model {}-{}: Specificity (tn/tn+fp):\t{:.4f}'.format(opt.arch, opt.model_type, specificity))
+    logger.info('Model {}-{}: AUC: \t{:.4f}'.format(opt.arch, opt.model_type,roc_auc_score(targets_label, hemo_scores)))
 
     return np.array(masks), outputs_score

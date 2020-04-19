@@ -33,7 +33,7 @@ class FeatureExtractor():
     def __call__(self, x):
         outputs = []
         for name, module in self.model._modules.items():
-            x = module(x) # compute this layer
+            x = module(x.squeeze()) # compute this layer
             if name in self.target_layers:
                 x.register_hook(self.save_gradient)
                 outputs += [x]
@@ -54,7 +54,7 @@ class ModelOutputs():
     def __call__(self, x):
         target_activations, output  = self.feature_extractor(x)
         output = output.view(output.size(0), -1)
-        output = self.model.new_fc(output)
+        # output = self.model.new_fc(output)
         return target_activations, output
 
 
@@ -81,11 +81,6 @@ def grad_cam(target_layer_names, extractor, input, index=1):
 
     # upsample image to correct size/value
     cam_volume = np.maximum(cam_volume.cpu().data.numpy(), 0) # only keep values >= 0
-    max_value = np.max(cam_volume)
-
-    cam_volume = [cv2.resize(cam, (224, 224)) for cam in cam_volume] # resize
-    cam_volume = np.array([np.clip(cam, 0.2, max_value) for cam in cam_volume])
-    cam_volume = np.clip((cam_volume - 0.2) / (max_value * 0.9), 0, 1)
 
     return cam_volume, output.mean(dim=0, keepdim=True)
 
@@ -95,9 +90,15 @@ def show_cam_on_image(imgs, masks, outpath):
     if not os.path.exists(outpath):
         os.makedirs(outpath)
 
-    for idx, (img, mask) in enumerate(zip(imgs, masks)):
+    max_value = np.max(masks)
 
-        heatmap = cv2.applyColorMap(np.uint8(255*mask), cv2.COLORMAP_JET)
+    for idx, (img, mask) in enumerate(zip(imgs, masks)):
+        h, w, _ = img.shape
+        cam = cv2.resize(mask, (h, w))
+        cam = np.clip(cam, 0.1, max_value)
+        cam = np.clip((cam - 0.1) / (max_value * 0.9), 0, 1)
+
+        heatmap = cv2.applyColorMap(np.uint8(255*cam), cv2.COLORMAP_JET)
         heatmap = np.float32(heatmap) / 255
 
         cam = heatmap + np.float32(img)
